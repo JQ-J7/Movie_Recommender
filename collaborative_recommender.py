@@ -9,9 +9,9 @@ Description:
     comprehensive model evaluation (RMSE, MSE, MAE, Precision, Recall, F1-Score).
 
 Key Capabilities:
-    1. Fast Item-Based Collaborative Filtering (Pearson Correlation Matrix).
-    2. Smart Title Search Engine (Handles partial names, typos, article reordering).
-    3. Comprehensive Evaluation (80/20 Train-Test split for RMSE, MSE, MAE & Precision/Recall/F1).
+    1. Dedicated Movie Search Engine (Instant lookup of Title, Genres, Ratings & Plot).
+    2. Fast Item-Based Collaborative Filtering (Pearson Correlation Matrix).
+    3. Comprehensive Model Evaluation (80/20 Train-Test split for RMSE, MSE, MAE & Precision/Recall/F1).
     4. Dataset Explorer & Sparsity Analysis.
     5. Clean Interactive Console User Interface.
 ========================================================================================
@@ -45,9 +45,10 @@ def fast_extract_names(val):
             return '|'.join(names)
     return val
 
+
 def load_dataset(dataset_file='movies_dataset.csv'):
     """
-    Loads the MovieLens dataset ('movies_dataset.csv').
+    Loads the MovieLens dataset ('merged_movies_ratings.csv').
     Parses genres, keywords, and overview metadata for rich search and recommendation.
     """
     try:
@@ -57,7 +58,8 @@ def load_dataset(dataset_file='movies_dataset.csv'):
             return None
             
         print(f"[+] Loading dataset from '{dataset_file}'...")
-        data = pd.read_csv(dataset_file) 
+        data = pd.read_csv(dataset_file)
+        
         # Clean and parse metadata fields
         if 'genres' in data.columns:
             data['genres_clean'] = data['genres'].apply(fast_extract_names)
@@ -65,7 +67,6 @@ def load_dataset(dataset_file='movies_dataset.csv'):
             data['genres_clean'] = ''
             
         keyword_col = 'keyword' if 'keyword' in data.columns else ('tags' if 'tags' in data.columns else None)
-    
         if keyword_col:
             data['keywords_clean'] = data[keyword_col].apply(fast_extract_names)
         else:
@@ -257,7 +258,83 @@ def get_collaborative_recommendations(movie_title, user_movie_matrix, movie_stat
 
 
 # ======================================================================================
-# 4. SYSTEM EVALUATION MODULE (RMSE, MSE, MAE, PRECISION, RECALL, F1)
+# 4. TABLE FORMATTING UTILITIES (ASCII BOX BORDERS)
+# ======================================================================================
+
+def print_ascii_table(headers, rows, alignments=None):
+    """
+    Renders a formatted ASCII table with clean borders and column alignments.
+    """
+    if not rows:
+        return
+        
+    num_cols = len(headers)
+    if alignments is None:
+        alignments = ['left'] * num_cols
+        
+    col_widths = [len(str(h)) for h in headers]
+    for r in rows:
+        for i, val in enumerate(r):
+            col_widths[i] = max(col_widths[i], len(str(val)))
+            
+    col_widths = [w + 2 for w in col_widths]
+    
+    border_line = "+" + "+".join(["-" * w for w in col_widths]) + "+"
+    header_line = "|" + "|".join([str(h).center(col_widths[i]) for i, h in enumerate(headers)]) + "|"
+    
+    print(border_line)
+    print(header_line)
+    print(border_line)
+    
+    for r in rows:
+        row_str = "|"
+        for i, val in enumerate(r):
+            val_str = str(val)
+            align = alignments[i] if i < len(alignments) else 'left'
+            if align == 'center':
+                cell = val_str.center(col_widths[i])
+            elif align == 'right':
+                cell = (val_str + " ").rjust(col_widths[i])
+            else:
+                cell = (" " + val_str).ljust(col_widths[i])
+            row_str += cell + "|"
+        print(row_str)
+        
+    print(border_line)
+
+
+def print_recommendations_table(df):
+    """
+    Renders an ASCII boxed table with clean border lines for movie recommendations.
+    """
+    if df is None or df.empty:
+        print("[!] No recommendations found meeting the correlation threshold.")
+        return
+        
+    headers = ["#", "Movie Title", "Similarity", "Avg Rating", "Ratings", "Co-rated", "Genres"]
+    rows = []
+    
+    for idx, row in enumerate(df.itertuples(), 1):
+        title = str(row.title)
+        if len(title) > 34:
+            title = title[:31] + "..."
+            
+        corr = f"{row.Correlation:.4f}"
+        avg_rating = f"{row.avg_rating:.2f}/5.0"
+        num_ratings = f"{int(row.num_of_ratings):,}"
+        overlap = f"{int(row._5 if hasattr(row, '_5') else row[5]):,}"
+        
+        genres_str = str(row.genres).replace('|', ' | ') if hasattr(row, 'genres') and row.genres else 'N/A'
+        if len(genres_str) > 40:
+            genres_str = genres_str[:37] + "..."
+            
+        rows.append([str(idx), title, corr, avg_rating, num_ratings, overlap, genres_str])
+        
+    print_ascii_table(headers, rows, alignments=['center', 'left', 'center', 'center', 'right', 'right', 'left'])
+
+
+# ======================================================================================
+# 5. SYSTEM EVALUATION MODULE (RMSE, MSE, MAE, PRECISION, RECALL, F1)
 # ======================================================================================
 
 def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_threshold=3.5):
@@ -322,29 +399,30 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     accuracy = (tp + tn) / len(actual_binary)
     
     # Rating Prediction Error Table
-    eval_table = pd.DataFrame([
-        {"Predictive Model / Baseline": "1. Global Mean Rating", "MSE": round(mse_global, 4), "RMSE": round(rmse_global, 4), "MAE": round(mae_global, 4)},
-        {"Predictive Model / Baseline": "2. Movie Average Rating", "MSE": round(mse_movie, 4), "RMSE": round(rmse_movie, 4), "MAE": round(mae_movie, 4)},
-        {"Predictive Model / Baseline": "3. User Average Rating", "MSE": round(mse_user, 4), "RMSE": round(rmse_user, 4), "MAE": round(mae_user, 4)},
-        {"Predictive Model / Baseline": "4. User + Movie Bias (CF Baseline)", "MSE": round(mse_combined, 4), "RMSE": round(rmse_combined, 4), "MAE": round(mae_combined, 4)},
-    ])
-    
     print("--- [A] Rating Prediction Accuracy (Lower is Better) ---")
-    print(eval_table.to_string(index=False))
+    headers_a = ["Predictive Model / Baseline", "MSE", "RMSE", "MAE"]
+    rows_a = [
+        ["1. Global Mean Rating", f"{mse_global:.4f}", f"{rmse_global:.4f}", f"{mae_global:.4f}"],
+        ["2. Movie Average Rating", f"{mse_movie:.4f}", f"{rmse_movie:.4f}", f"{mae_movie:.4f}"],
+        ["3. User Average Rating", f"{mse_user:.4f}", f"{rmse_user:.4f}", f"{mae_user:.4f}"],
+        ["4. User + Movie Bias (CF Baseline)", f"{mse_combined:.4f}", f"{rmse_combined:.4f}", f"{mae_combined:.4f}"]
+    ]
+    print_ascii_table(headers_a, rows_a, alignments=['left', 'center', 'center', 'center'])
     
     print("\n--- [B] Recommendation Classification Quality (Higher is Better) ---")
-    metrics_table = pd.DataFrame([
-        {"Metric": "Precision (Relevant Recommendations)", "Score": f"{precision:.4f} ({precision*100:.2f}%)"},
-        {"Metric": "Recall (Discovered Relevant Movies)", "Score": f"{recall:.4f} ({recall*100:.2f}%)"},
-        {"Metric": "F1-Score (Harmonic Mean)", "Score": f"{f1:.4f} ({f1*100:.2f}%)"},
-        {"Metric": "Classification Accuracy", "Score": f"{accuracy:.4f} ({accuracy*100:.2f}%)"},
-    ])
-    print(metrics_table.to_string(index=False))
+    headers_b = ["Evaluation Metric", "Score Value", "Percentage"]
+    rows_b = [
+        ["Precision (Relevant Recommendations)", f"{precision:.4f}", f"{precision*100:.2f}%"],
+        ["Recall (Discovered Relevant Movies)", f"{recall:.4f}", f"{recall*100:.2f}%"],
+        ["F1-Score (Harmonic Mean)", f"{f1:.4f}", f"{f1*100:.2f}%"],
+        ["Classification Accuracy", f"{accuracy:.4f}", f"{accuracy*100:.2f}%"]
+    ]
+    print_ascii_table(headers_b, rows_b, alignments=['left', 'center', 'center'])
     print("="*75 + "\n")
 
 
 # ======================================================================================
-# 5. DATASET SUMMARY & ANALYTICS MODULE
+# 6. DATASET SUMMARY & ANALYTICS MODULE
 # ======================================================================================
 
 def display_dataset_summary(data):
@@ -374,14 +452,87 @@ def display_dataset_summary(data):
         num_ratings=('rating', 'count'),
         avg_rating=('rating', 'mean')
     ).sort_values('num_ratings', ascending=False).head(5).reset_index()
-    top_rated['avg_rating'] = top_rated['avg_rating'].round(2)
-    print(top_rated.to_string(index=False))
+    
+    headers_top = ["#", "Movie Title", "Ratings Count", "Average Rating"]
+    rows_top = [
+        [str(i), row['title'], f"{int(row['num_ratings']):,}", f"{row['avg_rating']:.2f} / 5.0"]
+        for i, row in enumerate(top_rated.to_dict('records'), 1)
+    ]
+    print_ascii_table(headers_top, rows_top, alignments=['center', 'left', 'right', 'center'])
     print("="*75 + "\n")
 
 
 # ======================================================================================
 # 6. INTERACTIVE CLI / MAIN APPLICATION LOOP
 # ======================================================================================
+
+def interactive_movie_search_only(movie_stats):
+    """
+    Dedicated search mode: Looks up and displays complete movie details (Ratings, Genres, Keywords, Overview).
+    """
+    titles_list = movie_stats['title'].tolist()
+    
+    while True:
+        print("\n" + "-"*75)
+        try:
+            user_input = input("Enter movie title/keyword to lookup (or 'b' for main menu): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+            
+        if not user_input:
+            continue
+            
+        if user_input.lower() in ('b', 'back', 'exit', 'q', 'quit'):
+            break
+            
+        matches = search_movies(user_input, titles_list, movie_stats, max_results=5)
+        
+        if not matches:
+            print(f"\n[!] No movies found matching '{user_input}'.")
+            print("    Hint: Try typing a single keyword (e.g. 'Matrix', 'Star Wars', 'Avatar', 'Batman').")
+            continue
+            
+        # Movie Selection
+        if len(matches) == 1:
+            target_movie = matches[0]
+        else:
+            print(f"\nMultiple movies matched '{user_input}':")
+            for idx, title in enumerate(matches, 1):
+                cnt = movie_stats.loc[movie_stats['title'] == title, 'num_of_ratings'].values[0]
+                avg = movie_stats.loc[movie_stats['title'] == title, 'avg_rating'].values[0]
+                print(f"  [{idx}] {title} ({cnt} ratings, Avg: {avg:.2f}/5.0)")
+                
+            try:
+                choice = input(f"Select a movie [1-{len(matches)}] (or 'b' to re-search, default 1): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                break
+                
+            if choice.lower() in ('b', 'back', 'cancel', 'c', '0'):
+                continue
+            if choice.lower() in ('exit', 'q', 'quit'):
+                break
+                
+            if choice.isdigit() and 1 <= int(choice) <= len(matches):
+                target_movie = matches[int(choice) - 1]
+            else:
+                target_movie = matches[0]
+                
+        # Display Movie Details
+        movie_row = movie_stats[movie_stats['title'] == target_movie].iloc[0]
+        print("\n" + "="*75)
+        print("                            MOVIE DETAILS")
+        print("="*75)
+        print(f"Title          : {movie_row['title']}")
+        print(f"Movie ID       : {movie_row['movieId']}")
+        print(f"Average Rating : {movie_row['avg_rating']:.2f} / 5.0 stars")
+        print(f"Total Ratings  : {movie_row['num_of_ratings']:,} ratings")
+        print(f"Genres         : {movie_row['genres'].replace('|', ' | ') if movie_row['genres'] else 'N/A'}")
+        if 'keywords' in movie_row and movie_row['keywords']:
+            print(f"Keywords       : {movie_row['keywords'].replace('|', ' | ')}")
+        if 'overview' in movie_row and movie_row['overview']:
+            print(f"Overview       : {movie_row['overview']}")
+        print("="*75)
+
 
 def interactive_search_mode(user_movie_matrix, movie_stats):
     """
@@ -424,7 +575,7 @@ def interactive_search_mode(user_movie_matrix, movie_stats):
             except (EOFError, KeyboardInterrupt):
                 break
                 
-            if choice.lower() in ('b', 'back'):
+            if choice.lower() in ('b', 'back', 'cancel', 'c', '0'):
                 continue
             if choice.lower() in ('exit', 'q', 'quit'):
                 break
@@ -434,14 +585,27 @@ def interactive_search_mode(user_movie_matrix, movie_stats):
             else:
                 target_movie = matches[0]
                 
-        print(f"\n[*] Generating collaborative recommendations for: '{target_movie}'...")
-        recs = get_collaborative_recommendations(target_movie, user_movie_matrix, movie_stats, min_ratings=50, top_n=10)
+        # Ask for number of recommendations to display
+        try:
+            num_recs_input = input("Enter number of recommendations to display [default 10]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+            
+        if num_recs_input.lower() in ('b', 'back', 'cancel', 'c'):
+            continue
+        if num_recs_input.lower() in ('exit', 'q', 'quit'):
+            break
+            
+        top_n = int(num_recs_input) if num_recs_input.isdigit() and int(num_recs_input) > 0 else 10
+        
+        print(f"\n[*] Generating collaborative recommendations for: '{target_movie}' (Top {top_n})...\n")
+        recs = get_collaborative_recommendations(target_movie, user_movie_matrix, movie_stats, min_ratings=50, top_n=top_n)
         
         if recs is None or recs.empty:
             print("[!] No recommendations found meeting the correlation threshold.")
         else:
-            print("\n>>> Top Recommendations:")
-            print(recs.to_string(index=False))
+            print(">>> Top Recommendations:")
+            print_recommendations_table(recs)
 
 
 def main():
@@ -463,29 +627,32 @@ def main():
         print("\n" + "="*50)
         print("                 MAIN MENU")
         print("="*50)
-        print("  [1] Search Movie & Get Recommendations")
-        print("  [2] Run Recommender System Evaluation (RMSE/MAE/F1)")
-        print("  [3] View Dataset Summary & Statistics")
-        print("  [4] Exit Application")
+        print("  [1] Search Movie (View Details & Ratings)")
+        print("  [2] Get Recommendations by Movie")
+        print("  [3] Run Recommender System Evaluation (RMSE/MAE/F1)")
+        print("  [4] View Dataset Summary & Statistics")
+        print("  [5] Exit Application")
         print("="*50)
         
         try:
-            choice = input("Enter your option [1-4]: ").strip()
+            choice = input("Enter your option [1-5]: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nExiting Recommender System. Goodbye!")
             break
             
         if choice == '1':
-            interactive_search_mode(user_movie_matrix, movie_stats)
+            interactive_movie_search_only(movie_stats)
         elif choice == '2':
-            evaluate_recommender_system(data)
+            interactive_search_mode(user_movie_matrix, movie_stats)
         elif choice == '3':
+            evaluate_recommender_system(data)
+        elif choice == '4':
             display_dataset_summary(data)
-        elif choice in ('4', 'exit', 'quit', 'q'):
+        elif choice in ('5', 'exit', 'quit', 'q'):
             print("\nThank you for using the Recommender System. Goodbye!")
             break
         else:
-            print("[!] Invalid option. Please enter a number from 1 to 4.")
+            print("[!] Invalid option. Please enter a number from 1 to 5.")
 
 
 if __name__ == "__main__":
