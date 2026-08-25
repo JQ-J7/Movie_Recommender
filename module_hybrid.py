@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.decomposition import TruncatedSVD
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
@@ -661,6 +662,146 @@ def evaluate_alpha_sensitivity(data=None, step=0.1, alpha_list=None, test_size=0
     return pd.DataFrame(results)
 
 
+def evaluate_top10_models(data=None, test_size=0.2, random_state=42, relevance_threshold=4.0, k=10):
+    """
+    Evaluates Top-10 recommendation metrics across 5 specific model configurations:
+      1. Collaborative Filtering (SVD)
+      2. Content-Based Filtering
+      3. Hybrid 20% CF / 80% CBF (alpha = 0.2)
+      4. Hybrid 50% CF / 50% CBF (alpha = 0.5)
+      5. Hybrid 80% CF / 20% CBF (alpha = 0.8)
+    
+    Formula:
+      Score_hybrid = (alpha * Score_CF) + ((1 - alpha) * Score_CBF)
+      Where both CF and CBF scores are normalized to [0, 1].
+      
+    Returns:
+      Pandas DataFrame with Columns: ['Model', 'Precision@10', 'Recall@10', 'NDCG@10']
+    """
+    if data is None:
+        data = load_dataset()
+    elif isinstance(data, dict):
+        data = data.get('ratings', data.get('raw_data', load_dataset()))
+
+    train_df, test_df = train_test_split(data, test_size=test_size, random_state=random_state)
+
+    # 1. Collaborative Filtering: Matrix Factorization via SVD
+    user_item_train = train_df.pivot_table(index='userId', columns='movieId', values='rating').fillna(0)
+    u_idx_map = {uid: i for i, uid in enumerate(user_item_train.index)}
+    m_idx_map = {mid: j for j, mid in enumerate(user_item_train.columns)}
+
+    n_factors = min(50, min(user_item_train.shape) - 1)
+    svd = TruncatedSVD(n_components=n_factors, random_state=random_state)
+    U_sigma = svd.fit_transform(user_item_train.values)
+    V_t = svd.components_
+    pred_matrix = np.dot(U_sigma, V_t)
+
+    # Normalize SVD predictions to [0, 1]
+    min_svd = pred_matrix.min()
+    max_svd = pred_matrix.max()
+    pred_matrix_norm = (pred_matrix - min_svd) / (max_svd - min_svd) if max_svd > min_svd else pred_matrix
+
+    # 2. Content-Based Filtering: TF-IDF on genres, keywords, and synopsis overviews
+    unique_movies = data.drop_duplicates('movieId').copy()
+    soup_series = (
+        unique_movies['genres'].fillna('') + ' ' + 
+        unique_movies['keyword'].fillna('') + ' ' + 
+        unique_movies['overview'].fillna('')
+    ).str.lower()
+    
+    tfidf = TfidfVectorizer(stop_words='english', max_features=15000)
+    tfidf_mat = tfidf.fit_transform(soup_series)
+    m_to_soup_idx = dict(zip(unique_movies['movieId'], range(len(unique_movies))))
+
+    # User profile taste vector from liked movies (rating >= relevance_threshold) in train_df
+    user_liked = train_df[train_df['rating'] >= relevance_threshold].groupby('userId')['movieId'].apply(list).to_dict()
+    user_profiles = {}
+    for u, m_list in user_liked.items():
+        indices = [m_to_soup_idx[m] for m in m_list if m in m_to_soup_idx]
+        if indices:
+            user_profiles[u] = np.asarray(tfidf_mat[indices].mean(axis=0))
+
+    # Precompute test scores for CF and CBF
+    global_mean = train_df['rating'].mean()
+    movie_means = train_df.groupby('movieId')['rating'].mean().to_dict()
+    user_means = train_df.groupby('userId')['rating'].mean().to_dict()
+
+    u_ids = test_df['userId'].values
+    m_ids = test_df['movieId'].values
+
+    cf_scores = np.zeros(len(test_df), dtype=float)
+    cbf_scores = np.zeros(len(test_df), dtype=float)
+
+    for idx, (u, m) in enumerate(zip(u_ids, m_ids)):
+        # CF score (SVD normalized prediction)
+        if u in u_idx_map and m in m_idx_map:
+            cf_scores[idx] = pred_matrix_norm[u_idx_map[u], m_idx_map[m]]
+        else:
+            u_mean = user_means.get(u, global_mean)
+            m_mean = movie_means.get(m, global_mean)
+            cf_scores[idx] = np.clip((u_mean + m_mean - global_mean) / 5.0, 0.0, 1.0)
+            
+        # CBF score (Cosine similarity in [0, 1])
+        if u in user_profiles and m in m_to_soup_idx:
+            u_vec = user_profiles[u]
+            m_vec = tfidf_mat[m_to_soup_idx[m]]
+            cbf_scores[idx] = float(cosine_similarity(u_vec, m_vec)[0, 0])
+
+    test_eval = test_df.copy()
+    test_eval['score_cf'] = cf_scores
+    test_eval['score_cbf'] = cbf_scores
+
+    # 3. 5 Target Model Configurations
+    models = {
+        'Collaborative Filtering (SVD)': 1.0,
+        'Content-Based Filtering': 0.0,
+        'Hybrid 20% CF / 80% CBF': 0.2,
+        'Hybrid 50% CF / 50% CBF': 0.5,
+        'Hybrid 80% CF / 20% CBF': 0.8
+    }
+
+    grouped_users = [
+        (uid, u_df[['movieId', 'rating', 'score_cf', 'score_cbf']].copy())
+        for uid, u_df in test_eval.groupby('userId')
+    ]
+
+    rows = []
+    for model_name, alpha in models.items():
+        precisions, recalls, ndcgs = [], [], []
+        
+        for uid, u_df in grouped_users:
+            relevant = set(u_df[u_df['rating'] >= relevance_threshold]['movieId'])
+            if not relevant:
+                continue
+            
+            # Blended Score: Score_hybrid = (alpha * Score_CF) + ((1 - alpha) * Score_CBF)
+            score_hybrid = (alpha * u_df['score_cf']) + ((1.0 - alpha) * u_df['score_cbf'])
+            top_k_idx = np.argsort(score_hybrid.values)[::-1][:k]
+            top_k_movies = u_df['movieId'].values[top_k_idx]
+            
+            hits = [1 if m in relevant else 0 for m in top_k_movies]
+            k_eff = min(k, len(u_df))
+            p_k = sum(hits) / k_eff if k_eff > 0 else 0.0
+            r_k = sum(hits) / len(relevant)
+            
+            dcg = sum([h / log2(i + 2) for i, h in enumerate(hits)])
+            idcg = sum([1.0 / log2(i + 2) for i in range(min(k, len(relevant)))])
+            ndcg = (dcg / idcg) if idcg > 0 else 0.0
+            
+            precisions.append(p_k)
+            recalls.append(r_k)
+            ndcgs.append(ndcg)
+            
+        rows.append({
+            'Model': model_name,
+            f'Precision@{k}': round(float(np.mean(precisions)), 4),
+            f'Recall@{k}': round(float(np.mean(recalls)), 4),
+            f'NDCG@{k}': round(float(np.mean(ndcgs)), 4)
+        })
+
+    return pd.DataFrame(rows)
+
+
 # ======================================================================================
 # 5. USER SATISFACTION QUESTIONNAIRE MODULE
 # ======================================================================================
@@ -735,4 +876,8 @@ if __name__ == '__main__':
     print("\n[*] Running Alpha Sensitivity Analysis (0.0 -> 1.0, step=0.1)...")
     alpha_df = evaluate_alpha_sensitivity(data, step=0.1)
     print(alpha_df.to_string(index=False))
+    
+    print("\n[*] Running Top-10 Model Benchmarks (SVD, CBF, Hybrid 20/50/80%)...")
+    top10_df = evaluate_top10_models(data, relevance_threshold=4.0, k=10)
+    print(top10_df.to_string(index=False))
     print("\n[+] Done!")
