@@ -16,7 +16,7 @@ import re
 import ast
 import difflib
 import warnings
-from math import sqrt
+from math import sqrt, log2
 from datetime import datetime
 import numpy as np
 import pandas as pd
@@ -113,14 +113,18 @@ def load_dataset(dataset_file=DATASET_FILE):
     return data[core_cols]
 
 
-def build_engine_structures(data):
+def build_engine_structures(data=None):
     """
     Builds data structures required for Content-Based and Collaborative Filtering:
       - movie_stats: Aggregated statistics, metadata, and soup per unique title.
       - user_movie_matrix: User-Item rating interaction matrix (userId x title).
+      - ratings: Raw underlying interaction DataFrame.
       - tfidf_matrix & tfidf_vectorizer: TF-IDF representations of genres, keywords, & overview.
       - title_to_idx & idx_to_title mappings.
     """
+    if data is None:
+        data = load_dataset()
+
     # 1. Movie-level metadata aggregation
     agg_dict = {
         'movieId': ('movieId', 'first'),
@@ -131,7 +135,6 @@ def build_engine_structures(data):
         'tags': ('tags', 'first'),
         'overview': ('overview', 'first')
     }
-    # Filter only available columns
     actual_agg = {k: v for k, v in agg_dict.items() if v[0] in data.columns or k in ['avg_rating', 'num_of_ratings']}
     
     movie_stats = data.groupby('title').agg(**actual_agg).reset_index()
@@ -150,7 +153,6 @@ def build_engine_structures(data):
     movie_stats['overview'] = movie_stats['overview'].fillna('')
 
     # 2. Text Feature Engineering (Content Soup)
-    # Genres are repeated 2x to emphasize high-level genre clustering alongside themes & synopsis
     def create_soup(row):
         genres_clean = str(row['genres']).replace('|', ' ').replace('-', ' ')
         keywords_clean = str(row['keyword']).replace('|', ' ').replace('-', ' ')
@@ -178,6 +180,8 @@ def build_engine_structures(data):
     return {
         'movie_stats': movie_stats,
         'user_movie_matrix': user_movie_matrix,
+        'ratings': data,
+        'raw_data': data,
         'tfidf_matrix': tfidf_matrix,
         'tfidf_vectorizer': tfidf,
         'title_to_idx': title_to_idx,
@@ -194,7 +198,7 @@ def normalize_title_query(query):
     Generates variations for queries with leading articles.
     Example: 'The Matrix' -> ['The Matrix', 'Matrix, The', 'Matrix']
     """
-    query_clean = query.strip()
+    query_clean = str(query).strip()
     variants = [query_clean]
     for article in ['The ', 'A ', 'An ']:
         if query_clean.lower().startswith(article.lower()):
@@ -212,7 +216,6 @@ def search_movies(query, movie_stats, max_results=10):
         return movie_stats.sort_values(by='num_of_ratings', ascending=False)['title'].head(max_results).tolist()
 
     query_clean = str(query).strip()
-    query_lower = query_clean.lower()
     titles_list = movie_stats['title'].tolist()
     stats_map = dict(zip(movie_stats['title'], movie_stats['num_of_ratings']))
     
@@ -291,13 +294,21 @@ def compute_collaborative_similarity(target_title, structures, min_overlap=5):
     """
     Computes Item-Based Collaborative Filtering Pearson Correlation between target movie 
     and candidate movies based on co-rating user profiles.
-    Normalized from Pearson range [-1, 1] to similarity score [0, 1].
+    Normalizes Pearson correlation from [-1, 1] to [0, 1] range.
+    Safely handles missing or uncorrelated movies with default score 0.0.
     """
-    user_movie_matrix = structures['user_movie_matrix']
+    user_movie_matrix = structures.get('user_movie_matrix')
     movie_stats = structures['movie_stats']
     all_titles = movie_stats['title']
 
     cf_scores = pd.Series(0.0, index=all_titles)
+    
+    if user_movie_matrix is None:
+        if 'ratings' in structures:
+            user_movie_matrix = structures['ratings'].pivot_table(index='userId', columns='title', values='rating')
+        else:
+            return cf_scores
+
     if target_title not in user_movie_matrix.columns:
         return cf_scores
 
@@ -324,16 +335,17 @@ def compute_collaborative_similarity(target_title, structures, min_overlap=5):
                     corrs[col] = norm_r
 
     for col, score in corrs.items():
-        if col in cf_scores:
+        if col in cf_scores.index:
             cf_scores[col] = score
 
     return cf_scores
 
 
-def get_hybrid_recommendations(target_title, structures, alpha=0.5, min_ratings=15, genre_filter=None, top_n=10):
+def get_hybrid_recommendations(target_title, structures, alpha=0.5, min_ratings=15, genre_filter='All', top_n=10):
     """
     Generates hybrid recommendations for a target movie.
-    Formula: Score_Hybrid = alpha * Score_Content + (1 - alpha) * Score_Collaborative
+    Formula: Score = alpha * CB_score + (1 - alpha) * CF_score
+    Filters by min_ratings and genre_filter, removing the target movie from results.
     """
     movie_stats = structures['movie_stats']
     title_to_idx = structures['title_to_idx']
@@ -378,11 +390,21 @@ def get_hybrid_recommendations(target_title, structures, alpha=0.5, min_ratings=
     return top_results, None
 
 
-def get_user_personalized_recommendations(user_id, structures, raw_data, alpha=0.5, min_ratings=15, top_n=10):
+def get_user_personalized_recommendations(user_id, structures, raw_data=None, alpha=0.5, min_ratings=15, top_n=10):
     """
-    Generates personalized hybrid recommendations for an existing user based on their rating history.
-    Blends the user's Content Taste Vector with Collaborative Baseline Biases.
+    Calculates personalized hybrid recommendations for a user based on historical ratings.
+    Supports standard frontend signatures (user_id, structures, alpha, top_n) or (user_id, structures, raw_data, ...).
     """
+    # Handle flexible argument orders
+    if isinstance(raw_data, (float, int)) and not isinstance(raw_data, pd.DataFrame):
+        alpha = float(raw_data)
+        raw_data = structures.get('ratings', structures.get('raw_data', None))
+
+    if raw_data is None:
+        raw_data = structures.get('ratings', structures.get('raw_data', None))
+        if raw_data is None:
+            raw_data = load_dataset()
+
     movie_stats = structures['movie_stats']
     tfidf_matrix = structures['tfidf_matrix']
     title_to_idx = structures['title_to_idx']
@@ -443,14 +465,20 @@ def get_user_personalized_recommendations(user_id, structures, raw_data, alpha=0
 
 
 # ======================================================================================
-# 4. SYSTEM EVALUATION MODULE (RMSE, MSE, MAE, PRECISION, RECALL, F1)
+# 4. SYSTEM EVALUATION MODULE (RMSE, MSE, MAE, PRECISION, RECALL, F1, NDCG)
 # ======================================================================================
 
-def evaluate_models(data, test_size=0.2, random_state=42, relevance_threshold=3.5, alpha=0.5):
+def evaluate_models(data=None, test_size=0.2, random_state=42, relevance_threshold=3.5, alpha=0.5, top_k=10):
     """
     Evaluates Baselines, Content-Based Proxy, Collaborative Filtering, and Hybrid Models
     on an 80/20 train-test partition using error metrics and Top-N classification metrics.
+    Accepts either DataFrame or structures dictionary.
     """
+    if data is None:
+        data = load_dataset()
+    elif isinstance(data, dict):
+        data = data.get('ratings', data.get('raw_data', load_dataset()))
+
     train_df, test_df = train_test_split(data, test_size=test_size, random_state=random_state)
     
     global_mean = train_df['rating'].mean()
@@ -517,15 +545,18 @@ def evaluate_models(data, test_size=0.2, random_state=42, relevance_threshold=3.
     return pd.DataFrame(results), len(train_df), len(test_df)
 
 
-def evaluate_alpha_sensitivity(data, step=0.1, test_size=0.2, random_state=42, relevance_threshold=3.5):
+def evaluate_alpha_sensitivity(data=None, step=0.1, alpha_list=None, test_size=0.2, random_state=42, relevance_threshold=3.5, top_k=10):
     """
     Computes an Alpha Sensitivity Benchmark Table for alpha from 0.0 to 1.0 (step=0.1).
-    Evaluates Top-10 ranking metrics (precision@10, recall@10, f1@10, ndcg@10) across users.
-    Returns a DataFrame with only the exact columns:
+    Evaluates Top-K ranking metrics (precision@10, recall@10, f1@10, ndcg@10) across users.
+    Returns a DataFrame with the exact columns:
       ['alpha', 'CF_weight', 'CBF_weight', 'precision@10', 'recall@10', 'f1@10', 'ndcg@10']
     """
-    from math import log2
-    
+    if data is None:
+        data = load_dataset()
+    elif isinstance(data, dict):
+        data = data.get('ratings', data.get('raw_data', load_dataset()))
+
     train_df, test_df = train_test_split(data, test_size=test_size, random_state=random_state)
     
     # 1. Content User-Profile representations via TF-IDF
@@ -573,15 +604,20 @@ def evaluate_alpha_sensitivity(data, step=0.1, test_size=0.2, random_state=42, r
     test_eval['cf_norm'] = cf_norm
     test_eval['cbf_norm'] = cbf_norm
     
-    alphas = np.round(np.arange(0.0, 1.0 + step / 2, step), 2)
+    if alpha_list is not None:
+        alphas = np.array(alpha_list)
+    else:
+        alphas = np.round(np.arange(0.0, 1.0 + step / 2, step), 2)
+
     results = []
     
-    # Pre-group user test frames for ultra-fast loop
+    # Pre-group user test frames for ultra-fast evaluation
     grouped_users = [
         (uid, u_df[['movieId', 'rating', 'cf_norm', 'cbf_norm']].copy())
         for uid, u_df in test_eval.groupby('userId')
     ]
     
+    k_val = top_k
     for a in alphas:
         cf_w = round(1.0 - a, 2)
         cbf_w = round(a, 2)
@@ -594,32 +630,32 @@ def evaluate_alpha_sensitivity(data, step=0.1, test_size=0.2, random_state=42, r
                 continue
             
             hybrid_score = (a * u_df['cbf_norm']) + ((1.0 - a) * u_df['cf_norm'])
-            top10_idx = np.argsort(hybrid_score.values)[::-1][:10]
-            top10_movies = u_df['movieId'].values[top10_idx]
+            top_k_idx = np.argsort(hybrid_score.values)[::-1][:k_val]
+            top_k_movies = u_df['movieId'].values[top_k_idx]
             
-            hits = [1 if m in relevant else 0 for m in top10_movies]
-            k = min(10, len(u_df))
-            p10 = sum(hits) / k if k > 0 else 0.0
-            r10 = sum(hits) / len(relevant)
-            f10 = 2 * (p10 * r10) / (p10 + r10) if (p10 + r10) > 0 else 0.0
+            hits = [1 if m in relevant else 0 for m in top_k_movies]
+            k = min(k_val, len(u_df))
+            p_k = sum(hits) / k if k > 0 else 0.0
+            r_k = sum(hits) / len(relevant)
+            f_k = 2 * (p_k * r_k) / (p_k + r_k) if (p_k + r_k) > 0 else 0.0
             
             dcg = sum([h / log2(i + 2) for i, h in enumerate(hits)])
-            idcg = sum([1.0 / log2(i + 2) for i in range(min(10, len(relevant)))])
+            idcg = sum([1.0 / log2(i + 2) for i in range(min(k_val, len(relevant)))])
             ndcg = (dcg / idcg) if idcg > 0 else 0.0
             
-            precisions.append(p10)
-            recalls.append(r10)
-            f1s.append(f10)
+            precisions.append(p_k)
+            recalls.append(r_k)
+            f1s.append(f_k)
             ndcgs.append(ndcg)
             
         results.append({
             'alpha': f"{a:.1f}",
             'CF_weight': f"{cf_w:.1f}",
             'CBF_weight': f"{cbf_w:.1f}",
-            'precision@10': round(float(np.mean(precisions)), 4),
-            'recall@10': round(float(np.mean(recalls)), 4),
-            'f1@10': round(float(np.mean(f1s)), 4),
-            'ndcg@10': round(float(np.mean(ndcgs)), 4)
+            f'precision@{k_val}': round(float(np.mean(precisions)), 4),
+            f'recall@{k_val}': round(float(np.mean(recalls)), 4),
+            f'f1@{k_val}': round(float(np.mean(f1s)), 4),
+            f'ndcg@{k_val}': round(float(np.mean(ndcgs)), 4)
         })
         
     return pd.DataFrame(results)
@@ -629,19 +665,19 @@ def evaluate_alpha_sensitivity(data, step=0.1, test_size=0.2, random_state=42, r
 # 5. USER SATISFACTION QUESTIONNAIRE MODULE
 # ======================================================================================
 
-def save_survey_response(user_name, relevance, novelty, diversity, ui_ease, overall, feedback=""):
+def save_survey_response(user_name="Anonymous", relevance=5, novelty=4, diversity=4, ui_ease=5, overall=5.0, feedback=""):
     """
-    Saves questionnaire submission to CSV file.
+    Saves questionnaire submission to CSV file with header safety.
     """
     record = {
         'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'User Name': user_name.strip() if user_name else 'Anonymous',
+        'User Name': str(user_name).strip() if user_name else 'Anonymous',
         'Relevance (1-5)': relevance,
         'Novelty (1-5)': novelty,
         'Diversity (1-5)': diversity,
         'UI Usability (1-5)': ui_ease,
         'Overall Satisfaction (1-5)': overall,
-        'Feedback': feedback.strip()
+        'Feedback': str(feedback).strip()
     }
     
     df_new = pd.DataFrame([record])
@@ -654,7 +690,7 @@ def save_survey_response(user_name, relevance, novelty, diversity, ui_ease, over
 
 def load_survey_responses():
     """
-    Loads all questionnaire responses from CSV file.
+    Loads all questionnaire responses from CSV file safely.
     """
     if not os.path.exists(SURVEY_FILE):
         default_seed = pd.DataFrame([
