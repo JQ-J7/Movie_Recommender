@@ -7,7 +7,7 @@ Description:
     State-of-the-Art Hybrid Recommender System Engine fusing Content-Based Filtering 
     (TF-IDF & Cosine Similarity on Genres, Keywords, and Synopsis Overviews) with 
     Item/User Collaborative Filtering (Co-rating Pearson Correlation & Baseline Biases)
-    using 'merged_movies_ratings.csv'.
+    using 'movies_dataset.csv'.
 ========================================================================================
 """
 
@@ -28,7 +28,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 # Suppress runtime warnings from sparse correlation calculations
 warnings.filterwarnings('ignore')
 
-DATASET_FILE = 'merged_movies_ratings.csv'
+DATASET_FILE = 'movies_dataset.csv'
 SURVEY_FILE = 'survey_responses.csv'
 
 
@@ -65,19 +65,18 @@ def _extract_names_from_json_str(val):
 
 def load_dataset(dataset_file=DATASET_FILE):
     """
-    Loads and preprocesses the MovieLens & TMDb merged dataset ('merged_movies_ratings.csv').
+    Loads and preprocesses the MovieLens & TMDb dataset ('movies_dataset.csv').
     Cleans genres, keywords, overviews, and ratings.
     """
-    # Fallback to check default paths
     if not os.path.exists(dataset_file):
-        if os.path.exists('merged_movies_ratings.csv'):
-            dataset_file = 'merged_movies_ratings.csv'
-        elif os.path.exists('merged_dataset.csv'):
-            dataset_file = 'merged_dataset.csv'
+        for candidate in ['movies_dataset.csv', 'merged_movies_ratings.csv', 'merged_dataset.csv']:
+            if os.path.exists(candidate):
+                dataset_file = candidate
+                break
         else:
             raise FileNotFoundError(
                 f"Dataset file '{dataset_file}' not found in workspace. "
-                "Please ensure 'merged_movies_ratings.csv' is present."
+                "Please ensure 'movies_dataset.csv' is present."
             )
     
     data = pd.read_csv(dataset_file)
@@ -518,6 +517,114 @@ def evaluate_models(data, test_size=0.2, random_state=42, relevance_threshold=3.
     return pd.DataFrame(results), len(train_df), len(test_df)
 
 
+def evaluate_alpha_sensitivity(data, step=0.1, test_size=0.2, random_state=42, relevance_threshold=3.5):
+    """
+    Computes an Alpha Sensitivity Benchmark Table for alpha from 0.0 to 1.0 (step=0.1).
+    Evaluates Top-10 ranking metrics (precision@10, recall@10, f1@10, ndcg@10) across users.
+    Returns a DataFrame with only the exact columns:
+      ['alpha', 'CF_weight', 'CBF_weight', 'precision@10', 'recall@10', 'f1@10', 'ndcg@10']
+    """
+    from math import log2
+    
+    train_df, test_df = train_test_split(data, test_size=test_size, random_state=random_state)
+    
+    # 1. Content User-Profile representations via TF-IDF
+    unique_movies = data.drop_duplicates('movieId').copy()
+    soup_series = (
+        unique_movies['genres'].fillna('') + ' ' + 
+        unique_movies['keyword'].fillna('') + ' ' + 
+        unique_movies['overview'].fillna('')
+    ).str.lower()
+    
+    tfidf = TfidfVectorizer(stop_words='english', max_features=15000)
+    tfidf_mat = tfidf.fit_transform(soup_series)
+    m_to_idx = dict(zip(unique_movies['movieId'], range(len(unique_movies))))
+    
+    # Precompute user liked centroids from training partition
+    user_liked = train_df[train_df['rating'] >= relevance_threshold].groupby('userId')['movieId'].apply(list).to_dict()
+    user_profiles = {}
+    for u, m_list in user_liked.items():
+        indices = [m_to_idx[m] for m in m_list if m in m_to_idx]
+        if indices:
+            user_profiles[u] = np.asarray(tfidf_mat[indices].mean(axis=0))
+            
+    # 2. Collaborative User-Item Baseline representations
+    global_mean = train_df['rating'].mean()
+    movie_means = train_df.groupby('movieId')['rating'].mean().to_dict()
+    user_means = train_df.groupby('userId')['rating'].mean().to_dict()
+    
+    # Precompute baseline CF and CBF normalized similarity scores for test set
+    u_ids = test_df['userId'].values
+    m_ids = test_df['movieId'].values
+    
+    cf_norm = np.array([
+        (user_means.get(u, global_mean) + movie_means.get(m, global_mean) - global_mean) / 5.0
+        for u, m in zip(u_ids, m_ids)
+    ])
+    
+    cbf_norm = np.zeros(len(test_df), dtype=float)
+    for idx, (u, m) in enumerate(zip(u_ids, m_ids)):
+        if u in user_profiles and m in m_to_idx:
+            u_vec = user_profiles[u]
+            m_vec = tfidf_mat[m_to_idx[m]]
+            cbf_norm[idx] = float(cosine_similarity(u_vec, m_vec)[0, 0])
+            
+    test_eval = test_df.copy()
+    test_eval['cf_norm'] = cf_norm
+    test_eval['cbf_norm'] = cbf_norm
+    
+    alphas = np.round(np.arange(0.0, 1.0 + step / 2, step), 2)
+    results = []
+    
+    # Pre-group user test frames for ultra-fast loop
+    grouped_users = [
+        (uid, u_df[['movieId', 'rating', 'cf_norm', 'cbf_norm']].copy())
+        for uid, u_df in test_eval.groupby('userId')
+    ]
+    
+    for a in alphas:
+        cf_w = round(1.0 - a, 2)
+        cbf_w = round(a, 2)
+        
+        precisions, recalls, f1s, ndcgs = [], [], [], []
+        
+        for uid, u_df in grouped_users:
+            relevant = set(u_df[u_df['rating'] >= relevance_threshold]['movieId'])
+            if not relevant:
+                continue
+            
+            hybrid_score = (a * u_df['cbf_norm']) + ((1.0 - a) * u_df['cf_norm'])
+            top10_idx = np.argsort(hybrid_score.values)[::-1][:10]
+            top10_movies = u_df['movieId'].values[top10_idx]
+            
+            hits = [1 if m in relevant else 0 for m in top10_movies]
+            k = min(10, len(u_df))
+            p10 = sum(hits) / k if k > 0 else 0.0
+            r10 = sum(hits) / len(relevant)
+            f10 = 2 * (p10 * r10) / (p10 + r10) if (p10 + r10) > 0 else 0.0
+            
+            dcg = sum([h / log2(i + 2) for i, h in enumerate(hits)])
+            idcg = sum([1.0 / log2(i + 2) for i in range(min(10, len(relevant)))])
+            ndcg = (dcg / idcg) if idcg > 0 else 0.0
+            
+            precisions.append(p10)
+            recalls.append(r10)
+            f1s.append(f10)
+            ndcgs.append(ndcg)
+            
+        results.append({
+            'alpha': f"{a:.1f}",
+            'CF_weight': f"{cf_w:.1f}",
+            'CBF_weight': f"{cbf_w:.1f}",
+            'precision@10': round(float(np.mean(precisions)), 4),
+            'recall@10': round(float(np.mean(recalls)), 4),
+            'f1@10': round(float(np.mean(f1s)), 4),
+            'ndcg@10': round(float(np.mean(ndcgs)), 4)
+        })
+        
+    return pd.DataFrame(results)
+
+
 # ======================================================================================
 # 5. USER SATISFACTION QUESTIONNAIRE MODULE
 # ======================================================================================
@@ -588,4 +695,8 @@ if __name__ == '__main__':
     print("\n[*] Running 80/20 Train-Test Evaluation...")
     eval_df, n_tr, n_te = evaluate_models(data)
     print(eval_df.to_string(index=False))
+    
+    print("\n[*] Running Alpha Sensitivity Analysis (0.0 -> 1.0, step=0.1)...")
+    alpha_df = evaluate_alpha_sensitivity(data, step=0.1)
+    print(alpha_df.to_string(index=False))
     print("\n[+] Done!")

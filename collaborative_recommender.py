@@ -47,7 +47,7 @@ def fast_extract_names(val):
 
 def load_dataset(dataset_file='movies_dataset.csv'):
     """
-    Loads the MovieLens dataset ('merged_movies_ratings.csv').
+    Loads the MovieLens dataset ('movies_dataset.csv').
     Parses genres, keywords, and overview metadata for rich search and recommendation.
     """
     try:
