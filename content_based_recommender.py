@@ -130,19 +130,17 @@ def build_metadata_soup(row, genre_weight=3, keyword_weight=2, cast_weight=2, di
     return soup if soup else 'movie film story'
 
 
-def load_dataset(dataset_file='merged_movies_ratings.csv', fallback_file='merged_dataset.csv'):
+def load_dataset(dataset_file='movies_dataset.csv'):
     """
     Loads dataset file and cleans metadata features for Content-Based Filtering.
     """
-    target_file = dataset_file if os.path.exists(dataset_file) else fallback_file
-    
-    if not os.path.exists(target_file):
-        print(f"[!] Error: Dataset file '{target_file}' not found.")
-        print(f"    Please ensure '{dataset_file}' or '{fallback_file}' is in the current directory.")
+    if not os.path.exists(dataset_file):
+        print(f"[!] Error: Dataset file '{dataset_file}' not found.")
+        print(f"    Please ensure '{dataset_file}' is in the current directory.")
         return None
         
-    print(f"[+] Loading dataset from '{target_file}'...")
-    data = pd.read_csv(target_file)
+    print(f"[+] Loading dataset from '{dataset_file}'...")
+    data = pd.read_csv(dataset_file)
     
     # Standardize column naming
     if 'genres' in data.columns:
