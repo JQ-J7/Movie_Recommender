@@ -46,21 +46,19 @@ def fast_extract_names(val):
     return val
 
 
-def load_dataset(dataset_file='merged_movies_ratings.csv', fallback_file='merged_dataset.csv'):
+def load_dataset(dataset_file='movies_dataset.csv'):
     """
-    Loads the MovieLens dataset ('merged_movies_ratings.csv' or 'merged_dataset.csv').
+    Loads the MovieLens dataset ('merged_movies_ratings.csv').
     Parses genres, keywords, and overview metadata for rich search and recommendation.
     """
-    target_file = dataset_file if os.path.exists(dataset_file) else fallback_file
-    
     try:
-        if not os.path.exists(target_file):
-            print(f"[!] Error: Dataset file '{target_file}' not found.")
+        if not os.path.exists(dataset_file):
+            print(f"[!] Error: Dataset file '{dataset_file}' not found.")
             print(f"    Please ensure '{dataset_file}' exists in the current directory.")
             return None
             
-        print(f"[+] Loading dataset from '{target_file}'...")
-        data = pd.read_csv(target_file)
+        print(f"[+] Loading dataset from '{dataset_file}'...")
+        data = pd.read_csv(dataset_file)
         
         # Clean and parse metadata fields
         if 'genres' in data.columns:
@@ -493,4 +491,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+
