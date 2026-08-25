@@ -197,11 +197,6 @@ except Exception as e:
 # SIDEBAR CONTROLS & HYPERPARAMETER TUNING
 # ======================================================================================
 with st.sidebar:
-    try:
-        st.image("https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=400&auto=format&fit=crop", use_column_width=True)
-    except Exception:
-        st.image("https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=400&auto=format&fit=crop")
-        
     st.markdown("### 🎛️ Hybrid Engine Settings")
     
     recommendation_mode = st.radio(
@@ -250,10 +245,6 @@ with st.sidebar:
     )
     
     top_n = st.slider("Top-N Recommendations", min_value=3, max_value=25, value=8, step=1)
-    
-    st.markdown("---")
-    st.caption("Developed for **TARUMT AI Project (Session 202605)**")
-    st.caption("Module: **Hybrid Recommender System (GUI)**")
 
 
 # ======================================================================================
