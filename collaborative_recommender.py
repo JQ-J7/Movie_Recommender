@@ -35,23 +35,49 @@ warnings.filterwarnings('ignore')
 # 1. DATA LOADING MODULE
 # ======================================================================================
 
-def load_dataset(dataset_file='merged_movies_ratings.csv'):
+def fast_extract_names(val):
+    """Fast extraction of 'name' fields from JSON/dict formatted strings."""
+    if not isinstance(val, str) or not val:
+        return ''
+    if val.startswith('['):
+        names = re.findall(r"'name':\s*'([^']*)'", val)
+        if names:
+            return '|'.join(names)
+    return val
+
+
+def load_dataset(dataset_file='merged_movies_ratings.csv', fallback_file='merged_dataset.csv'):
     """
-    Loads the merged MovieLens dataset ('merged_movies_ratings.csv').
+    Loads the MovieLens dataset ('merged_movies_ratings.csv' or 'merged_dataset.csv').
+    Parses genres, keywords, and overview metadata for rich search and recommendation.
     """
+    target_file = dataset_file if os.path.exists(dataset_file) else fallback_file
+    
     try:
-        if not os.path.exists(dataset_file):
-            if os.path.exists('merged_movies_ratings.csv'):
-                dataset_file = 'merged_movies_ratings.csv'
-            else:
-                print(f"[!] Error: Dataset file '{dataset_file}' not found.")
-                print("    Please ensure 'merged_movies_ratings.csv' exists in the current directory.")
-                return None
+        if not os.path.exists(target_file):
+            print(f"[!] Error: Dataset file '{target_file}' not found.")
+            print(f"    Please ensure '{dataset_file}' exists in the current directory.")
+            return None
             
-        print(f"[+] Loading dataset from '{dataset_file}'...")
-        data = pd.read_csv(dataset_file)
-        if 'tags' in data.columns:
-            data['tags'] = data['tags'].fillna('')
+        print(f"[+] Loading dataset from '{target_file}'...")
+        data = pd.read_csv(target_file)
+        
+        # Clean and parse metadata fields
+        if 'genres' in data.columns:
+            data['genres_clean'] = data['genres'].apply(fast_extract_names)
+        else:
+            data['genres_clean'] = ''
+            
+        keyword_col = 'keyword' if 'keyword' in data.columns else ('tags' if 'tags' in data.columns else None)
+        if keyword_col:
+            data['keywords_clean'] = data[keyword_col].apply(fast_extract_names)
+        else:
+            data['keywords_clean'] = ''
+            
+        if 'overview' in data.columns:
+            data['overview_clean'] = data['overview'].fillna('')
+        else:
+            data['overview_clean'] = ''
             
         print(f"[+] Successfully loaded {len(data):,} ratings across {data['movieId'].nunique():,} unique movies.\n")
         return data
@@ -67,19 +93,18 @@ def build_recommender_matrix(data):
     """
     print("[*] Building User-Item Interaction Matrix & Movie Statistics...")
     
-    # Calculate movie-level statistics (including genres, tags, links)
+    # Calculate movie-level statistics
     movie_stats = data.groupby('title').agg(
         avg_rating=('rating', 'mean'),
         num_of_ratings=('rating', 'count'),
-        genres=('genres', 'first'),
-        tags=('tags', 'first') if 'tags' in data.columns else ('genres', lambda x: ''),
+        genres=('genres_clean', 'first'),
+        keywords=('keywords_clean', 'first'),
+        overview=('overview_clean', 'first'),
         movieId=('movieId', 'first')
     ).reset_index()
     
-    movie_stats['tags'] = movie_stats['tags'].fillna('')
-    
     # Create the User-Item matrix (rows = userId, columns = title)
-    user_movie_matrix = data.pivot_table(index='userId', columns='title', values='rating')
+    user_movie_matrix = data.pivot_table(index='userId', columns='title', values='rating', aggfunc='mean')
     
     num_users, num_movies = user_movie_matrix.shape
     print(f"[+] User-Item Matrix ready: {num_users} users x {num_movies} movies.\n")
@@ -93,7 +118,7 @@ def build_recommender_matrix(data):
 def normalize_title_query(query):
     """
     Generates variations for queries with leading articles.
-    Example: 'The Matrix' -> ['The Matrix', 'Matrix, The', 'Matrix']
+    Example: 'Matrix' -> ['Matrix', 'The Matrix', 'Matrix, The']
     """
     query_clean = query.strip()
     variants = [query_clean]
@@ -101,6 +126,8 @@ def normalize_title_query(query):
         if query_clean.lower().startswith(article.lower()):
             variants.append(query_clean[len(article):].strip() + ', ' + article.strip())
             variants.append(query_clean[len(article):].strip())
+        else:
+            variants.append(article + query_clean)
     return variants
 
 
@@ -108,7 +135,7 @@ def search_movies(query, titles_list, movie_stats, max_results=5):
     """
     Multi-attribute all-search engine:
     1. Exact case-insensitive match on Title (with or without release year).
-    2. Combined candidate scoring across Titles, Tags/Keywords, and Genres.
+    2. Combined candidate scoring across Titles, Keywords/Tags, Genres, and Overview.
     3. Fuzzy string similarity fallback.
     """
     query_clean = query.strip()
@@ -126,10 +153,10 @@ def search_movies(query, titles_list, movie_stats, max_results=5):
             if clean_title == var_lower:
                 return [title]
                 
-    # 2. Gather candidates from Title, Tags, and Genres
+    # 2. Gather candidates from Title, Keywords, Genres, and Overview
     scored_candidates = {}
     
-    # Title substring matches (highest weight)
+    # Title substring matches (highest weight: 1000 + popularity)
     for var in query_variants:
         var_lower = var.lower()
         for title in titles_list:
@@ -137,21 +164,29 @@ def search_movies(query, titles_list, movie_stats, max_results=5):
                 pop = stats_map.get(title, 0)
                 scored_candidates[title] = max(scored_candidates.get(title, 0), 1000 + pop)
                 
-    # Tag matches (weight: 500)
-    if 'tags' in movie_stats.columns:
-        tag_matches = movie_stats[movie_stats['tags'].str.contains(query_clean, case=False, na=False, regex=False)]
-        for _, row in tag_matches.iterrows():
+    # Keywords / Tags matches (weight: 500 + popularity)
+    if 'keywords' in movie_stats.columns:
+        kw_matches = movie_stats[movie_stats['keywords'].str.contains(query_clean, case=False, na=False, regex=False)]
+        for _, row in kw_matches.iterrows():
             t = row['title']
             pop = row['num_of_ratings']
             scored_candidates[t] = max(scored_candidates.get(t, 0), 500 + pop)
             
-    # Genre matches (weight: 100)
+    # Genre matches (weight: 200 + popularity)
     genre_matches = movie_stats[movie_stats['genres'].str.contains(query_clean, case=False, na=False, regex=False)]
     for _, row in genre_matches.iterrows():
         t = row['title']
         pop = row['num_of_ratings']
-        scored_candidates[t] = max(scored_candidates.get(t, 0), 100 + pop)
+        scored_candidates[t] = max(scored_candidates.get(t, 0), 200 + pop)
         
+    # Overview keyword matches (weight: 100 + popularity)
+    if 'overview' in movie_stats.columns:
+        ov_matches = movie_stats[movie_stats['overview'].str.contains(r'\b' + re.escape(query_clean) + r'\b', case=False, na=False, regex=True)]
+        for _, row in ov_matches.head(10).iterrows():
+            t = row['title']
+            pop = row['num_of_ratings']
+            scored_candidates[t] = max(scored_candidates.get(t, 0), 100 + pop)
+            
     if scored_candidates:
         sorted_candidates = sorted(scored_candidates.keys(), key=lambda t: scored_candidates[t], reverse=True)
         return sorted_candidates[:max_results]
@@ -388,8 +423,13 @@ def interactive_search_mode(user_movie_matrix, movie_stats):
                 print(f"  [{idx}] {title} ({cnt} ratings, Avg: {avg:.2f}/5.0)")
                 
             try:
-                choice = input(f"Select a movie [1-{len(matches)}] (default 1): ").strip()
+                choice = input(f"Select a movie [1-{len(matches)}] (or 'b' to re-search, default 1): ").strip()
             except (EOFError, KeyboardInterrupt):
+                break
+                
+            if choice.lower() in ('b', 'back'):
+                continue
+            if choice.lower() in ('exit', 'q', 'quit'):
                 break
                 
             if choice.isdigit() and 1 <= int(choice) <= len(matches):
@@ -453,4 +493,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+
