@@ -45,7 +45,6 @@ def fast_extract_names(val):
             return '|'.join(names)
     return val
 
-
 def load_dataset(dataset_file='movies_dataset.csv'):
     """
     Loads the MovieLens dataset ('merged_movies_ratings.csv').
@@ -58,8 +57,7 @@ def load_dataset(dataset_file='movies_dataset.csv'):
             return None
             
         print(f"[+] Loading dataset from '{dataset_file}'...")
-        data = pd.read_csv(dataset_file)
-        
+        data = pd.read_csv(dataset_file) 
         # Clean and parse metadata fields
         if 'genres' in data.columns:
             data['genres_clean'] = data['genres'].apply(fast_extract_names)
@@ -67,6 +65,7 @@ def load_dataset(dataset_file='movies_dataset.csv'):
             data['genres_clean'] = ''
             
         keyword_col = 'keyword' if 'keyword' in data.columns else ('tags' if 'tags' in data.columns else None)
+    
         if keyword_col:
             data['keywords_clean'] = data[keyword_col].apply(fast_extract_names)
         else:

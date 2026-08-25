@@ -5,7 +5,7 @@
 ========================================================================================
 Description:
     State-of-the-Art Streamlit Web Application for Hybrid Movie Recommendations.
-    Uses module_hybrid.py with merged_dataset.csv (ignoring imdbId and tmdbId).
+    Uses module_hybrid.py with merged_movies_ratings.csv.
     Features:
       1. Dual Engine: Movie-to-Movie Discovery & User-Personalized Recommendations.
       2. Dynamic Alpha Control (Content-Based vs Collaborative Filtering Balance).
@@ -175,7 +175,7 @@ st.markdown("""
 # ======================================================================================
 @st.cache_data(show_spinner="🎬 Loading MovieLens Dataset...")
 def get_cached_dataset():
-    return module_hybrid.load_dataset('merged_dataset.csv')
+    return module_hybrid.load_dataset('merged_movies_ratings.csv')
 
 @st.cache_resource(show_spinner="⚡ Building Hybrid TF-IDF & Matrix Structures...")
 def get_cached_structures(data):
@@ -197,11 +197,6 @@ except Exception as e:
 # SIDEBAR CONTROLS & HYPERPARAMETER TUNING
 # ======================================================================================
 with st.sidebar:
-    try:
-        st.image("https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=400&auto=format&fit=crop", use_column_width=True)
-    except Exception:
-        st.image("https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=400&auto=format&fit=crop")
-        
     st.markdown("### 🎛️ Hybrid Engine Settings")
     
     recommendation_mode = st.radio(
@@ -250,10 +245,6 @@ with st.sidebar:
     )
     
     top_n = st.slider("Top-N Recommendations", min_value=3, max_value=25, value=8, step=1)
-    
-    st.markdown("---")
-    st.caption("Developed for **TARUMT AI Project (Session 202605)**")
-    st.caption("Module: **Hybrid Recommender System (GUI)**")
 
 
 # ======================================================================================
@@ -469,10 +460,10 @@ with tab2:
     
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.markdown("""
+        st.markdown(f"""
         <div class="metric-card">
             <div style="color: #94A3B8; font-size: 0.85rem;">Dataset Volume</div>
-            <div class="stat-number">100,836</div>
+            <div class="stat-number">{len(data):,}</div>
             <div style="color: #64748B; font-size: 0.75rem;">Total MovieLens Ratings</div>
         </div>
         """, unsafe_allow_html=True)

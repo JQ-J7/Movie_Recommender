@@ -4,14 +4,16 @@
                     Module: Hybrid Recommender System
 ========================================================================================
 Description:
-    Hybrid Recommender System Engine combining Content-Based Filtering (TF-IDF 
-    and Cosine Similarity on Genres/Tags) and Collaborative Filtering (User-Item 
-    Interaction & Rating Correlation) using merged_dataset.csv.
+    State-of-the-Art Hybrid Recommender System Engine fusing Content-Based Filtering 
+    (TF-IDF & Cosine Similarity on Genres, Keywords, and Synopsis Overviews) with 
+    Item/User Collaborative Filtering (Co-rating Pearson Correlation & Baseline Biases)
+    using 'merged_movies_ratings.csv'.
 ========================================================================================
 """
 
 import os
 import re
+import ast
 import difflib
 import warnings
 from math import sqrt
@@ -23,63 +25,148 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
+# Suppress runtime warnings from sparse correlation calculations
 warnings.filterwarnings('ignore')
 
+DATASET_FILE = 'merged_movies_ratings.csv'
 SURVEY_FILE = 'survey_responses.csv'
 
 
 # ======================================================================================
-# 1. DATA LOADING & PREPROCESSING MODULE (IGNORING IMDB/TMDB)
+# 1. DATA LOADING & PREPROCESSING MODULE
 # ======================================================================================
 
-def load_dataset(dataset_file='merged_dataset.csv'):
+def _extract_names_from_json_str(val):
     """
-    Loads the pre-merged MovieLens dataset ('merged_dataset.csv').
-    Ignores external ID fields (imdbId, tmdbId).
+    Parses JSON-like lists of dicts such as [{'id': 18, 'name': 'Drama'}, ...]
+    into clean pipe-delimited strings: 'Drama|Crime'.
     """
+    if pd.isna(val) or not val:
+        return ''
+    if isinstance(val, str):
+        val_str = val.strip()
+        if not val_str or val_str == '[]':
+            return ''
+        if val_str.startswith('[') and val_str.endswith(']'):
+            try:
+                items = ast.literal_eval(val_str)
+                if isinstance(items, list):
+                    names = [
+                        item['name'].strip()
+                        for item in items
+                        if isinstance(item, dict) and 'name' in item and item['name']
+                    ]
+                    return '|'.join(names)
+            except Exception:
+                pass
+        return val_str
+    return str(val)
+
+
+def load_dataset(dataset_file=DATASET_FILE):
+    """
+    Loads and preprocesses the MovieLens & TMDb merged dataset ('merged_movies_ratings.csv').
+    Cleans genres, keywords, overviews, and ratings.
+    """
+    # Fallback to check default paths
     if not os.path.exists(dataset_file):
-        raise FileNotFoundError(f"Dataset file '{dataset_file}' not found.")
+        if os.path.exists('merged_movies_ratings.csv'):
+            dataset_file = 'merged_movies_ratings.csv'
+        elif os.path.exists('merged_dataset.csv'):
+            dataset_file = 'merged_dataset.csv'
+        else:
+            raise FileNotFoundError(
+                f"Dataset file '{dataset_file}' not found in workspace. "
+                "Please ensure 'merged_movies_ratings.csv' is present."
+            )
     
     data = pd.read_csv(dataset_file)
-    data['tags'] = data['tags'].fillna('')
-    data['genres'] = data['genres'].fillna('')
     
-    # Use only core columns: userId, movieId, rating, timestamp, title, genres, tags
-    core_cols = [c for c in ['userId', 'movieId', 'rating', 'timestamp', 'title', 'genres', 'tags'] if c in data.columns]
+    # Fast vectorized parsing using unique string mapping cache
+    if 'genres' in data.columns:
+        unique_genres = {g: _extract_names_from_json_str(g) for g in data['genres'].dropna().unique()}
+        data['genres'] = data['genres'].map(unique_genres).fillna('')
+    else:
+        data['genres'] = ''
+
+    if 'keyword' in data.columns:
+        unique_keywords = {k: _extract_names_from_json_str(k) for k in data['keyword'].dropna().unique()}
+        data['keyword'] = data['keyword'].map(unique_keywords).fillna('')
+    elif 'tags' in data.columns:
+        data['keyword'] = data['tags'].fillna('')
+    else:
+        data['keyword'] = ''
+
+    # Provide 'tags' alias for backwards compatibility
+    data['tags'] = data['keyword']
+
+    if 'overview' in data.columns:
+        data['overview'] = data['overview'].fillna('')
+    else:
+        data['overview'] = ''
+
+    # Ensure rating is numeric
+    data['rating'] = pd.to_numeric(data['rating'], errors='coerce')
+    data = data.dropna(subset=['rating', 'title'])
+
+    # Standardize column selection
+    core_cols = [c for c in ['userId', 'movieId', 'rating', 'timestamp', 'title', 'genres', 'overview', 'keyword', 'tags'] if c in data.columns]
     return data[core_cols]
 
 
 def build_engine_structures(data):
     """
     Builds data structures required for Content-Based and Collaborative Filtering:
-      - movie_stats: Metadata and aggregate statistics per movie.
-      - user_movie_matrix: User-Item rating matrix.
-      - tfidf_matrix & tfidf_vectorizer: TF-IDF representations of genres and tags.
+      - movie_stats: Aggregated statistics, metadata, and soup per unique title.
+      - user_movie_matrix: User-Item rating interaction matrix (userId x title).
+      - tfidf_matrix & tfidf_vectorizer: TF-IDF representations of genres, keywords, & overview.
       - title_to_idx & idx_to_title mappings.
     """
     # 1. Movie-level metadata aggregation
-    movie_stats = data.groupby('title').agg(
-        movieId=('movieId', 'first'),
-        avg_rating=('rating', 'mean'),
-        num_of_ratings=('rating', 'count'),
-        genres=('genres', 'first'),
-        tags=('tags', 'first')
-    ).reset_index()
-
-    movie_stats['avg_rating'] = movie_stats['avg_rating'].round(2)
-    movie_stats['tags'] = movie_stats['tags'].fillna('')
-    movie_stats['genres'] = movie_stats['genres'].fillna('')
+    agg_dict = {
+        'movieId': ('movieId', 'first'),
+        'avg_rating': ('rating', 'mean'),
+        'num_of_ratings': ('rating', 'count'),
+        'genres': ('genres', 'first'),
+        'keyword': ('keyword', 'first'),
+        'tags': ('tags', 'first'),
+        'overview': ('overview', 'first')
+    }
+    # Filter only available columns
+    actual_agg = {k: v for k, v in agg_dict.items() if v[0] in data.columns or k in ['avg_rating', 'num_of_ratings']}
     
-    # 2. Text Feature Engineering for Content-Based Filtering
+    movie_stats = data.groupby('title').agg(**actual_agg).reset_index()
+    movie_stats['avg_rating'] = movie_stats['avg_rating'].round(2)
+    
+    if 'tags' not in movie_stats.columns:
+        movie_stats['tags'] = movie_stats.get('keyword', '')
+    if 'keyword' not in movie_stats.columns:
+        movie_stats['keyword'] = movie_stats.get('tags', '')
+    if 'overview' not in movie_stats.columns:
+        movie_stats['overview'] = ''
+
+    movie_stats['tags'] = movie_stats['tags'].fillna('')
+    movie_stats['keyword'] = movie_stats['keyword'].fillna('')
+    movie_stats['genres'] = movie_stats['genres'].fillna('')
+    movie_stats['overview'] = movie_stats['overview'].fillna('')
+
+    # 2. Text Feature Engineering (Content Soup)
+    # Genres are repeated 2x to emphasize high-level genre clustering alongside themes & synopsis
     def create_soup(row):
-        genres_clean = str(row['genres']).replace('|', ' ').replace('-', '')
-        tags_clean = str(row['tags']).replace('|', ' ').replace('-', ' ')
-        return f"{genres_clean} {genres_clean} {tags_clean}".strip().lower()
+        genres_clean = str(row['genres']).replace('|', ' ').replace('-', ' ')
+        keywords_clean = str(row['keyword']).replace('|', ' ').replace('-', ' ')
+        overview_clean = str(row['overview'])
+        return f"{genres_clean} {genres_clean} {keywords_clean} {overview_clean}".strip().lower()
 
     movie_stats['soup'] = movie_stats.apply(create_soup, axis=1)
 
     # 3. TF-IDF Matrix Calculation
-    tfidf = TfidfVectorizer(stop_words='english', token_pattern=r'(?u)\b\w+\b', ngram_range=(1, 2))
+    tfidf = TfidfVectorizer(
+        stop_words='english',
+        token_pattern=r'(?u)\b\w+\b',
+        ngram_range=(1, 2),
+        max_features=30000
+    )
     tfidf_matrix = tfidf.fit_transform(movie_stats['soup'])
 
     # 4. Index Mappings
@@ -104,6 +191,10 @@ def build_engine_structures(data):
 # ======================================================================================
 
 def normalize_title_query(query):
+    """
+    Generates variations for queries with leading articles.
+    Example: 'The Matrix' -> ['The Matrix', 'Matrix, The', 'Matrix']
+    """
     query_clean = query.strip()
     variants = [query_clean]
     for article in ['The ', 'A ', 'An ']:
@@ -115,14 +206,18 @@ def normalize_title_query(query):
 
 def search_movies(query, movie_stats, max_results=10):
     """
-    Search movies by title, tags, and genres with fuzzy fallback.
+    Search movies by title, keywords/tags, genres, and overview with fuzzy fallback.
+    Ranks candidates by relevance and rating volume.
     """
-    query_clean = query.strip()
+    if not query or not str(query).strip():
+        return movie_stats.sort_values(by='num_of_ratings', ascending=False)['title'].head(max_results).tolist()
+
+    query_clean = str(query).strip()
     query_lower = query_clean.lower()
     titles_list = movie_stats['title'].tolist()
     stats_map = dict(zip(movie_stats['title'], movie_stats['num_of_ratings']))
     
-    # 1. Exact match
+    # 1. Exact match checking
     variants = normalize_title_query(query_clean)
     for var in variants:
         var_lower = var.lower()
@@ -142,22 +237,31 @@ def search_movies(query, movie_stats, max_results=10):
                 pop = stats_map.get(title, 0)
                 scored[title] = max(scored.get(title, 0), 1000 + pop)
 
-    # 3. Tags & Genres matching
-    tag_matches = movie_stats[movie_stats['tags'].str.contains(query_clean, case=False, na=False, regex=False)]
+    # 3. Keywords & Tags matching
+    tag_col = 'keyword' if 'keyword' in movie_stats.columns else 'tags'
+    tag_matches = movie_stats[movie_stats[tag_col].str.contains(query_clean, case=False, na=False, regex=False)]
     for _, row in tag_matches.iterrows():
         t = row['title']
         scored[t] = max(scored.get(t, 0), 500 + row['num_of_ratings'])
 
+    # 4. Genres matching
     genre_matches = movie_stats[movie_stats['genres'].str.contains(query_clean, case=False, na=False, regex=False)]
     for _, row in genre_matches.iterrows():
         t = row['title']
         scored[t] = max(scored.get(t, 0), 200 + row['num_of_ratings'])
 
+    # 5. Overview synopsis matching
+    if 'overview' in movie_stats.columns:
+        overview_matches = movie_stats[movie_stats['overview'].str.contains(query_clean, case=False, na=False, regex=False)]
+        for _, row in overview_matches.iterrows():
+            t = row['title']
+            scored[t] = max(scored.get(t, 0), 100 + row['num_of_ratings'])
+
     if scored:
         sorted_titles = sorted(scored.keys(), key=lambda t: scored[t], reverse=True)
         return sorted_titles[:max_results]
 
-    # 4. Fuzzy fallback
+    # 6. Fuzzy fallback
     return difflib.get_close_matches(query_clean, titles_list, n=max_results, cutoff=0.35)
 
 
@@ -167,7 +271,8 @@ def search_movies(query, movie_stats, max_results=10):
 
 def compute_content_similarity(target_title, structures):
     """
-    Computes Content-Based cosine similarity for a target movie against all other movies.
+    Computes Content-Based cosine similarity for a target movie against all other movies
+    using the TF-IDF representation of genres, keywords, and synopsis overviews.
     """
     movie_stats = structures['movie_stats']
     title_to_idx = structures['title_to_idx']
@@ -185,8 +290,9 @@ def compute_content_similarity(target_title, structures):
 
 def compute_collaborative_similarity(target_title, structures, min_overlap=5):
     """
-    Computes Collaborative Filtering Pearson Correlation between target movie and all other movies.
-    Normalized from [-1, 1] to [0, 1].
+    Computes Item-Based Collaborative Filtering Pearson Correlation between target movie 
+    and candidate movies based on co-rating user profiles.
+    Normalized from Pearson range [-1, 1] to similarity score [0, 1].
     """
     user_movie_matrix = structures['user_movie_matrix']
     movie_stats = structures['movie_stats']
@@ -199,7 +305,7 @@ def compute_collaborative_similarity(target_title, structures, min_overlap=5):
     target_ratings = user_movie_matrix[target_title]
     target_mask = target_ratings.notna()
 
-    # Pre-filter candidate movies with at least 5 ratings for fast computation
+    # Pre-filter candidate movies with at least 5 ratings for fast vector operations
     candidate_titles = movie_stats[movie_stats['num_of_ratings'] >= 5]['title']
     candidate_matrix = user_movie_matrix[[col for col in candidate_titles if col in user_movie_matrix.columns]]
 
@@ -260,7 +366,10 @@ def get_hybrid_recommendations(target_title, structures, alpha=0.5, min_ratings=
     if genre_filter and genre_filter != 'All':
         hybrid_df = hybrid_df[hybrid_df['genres'].str.contains(genre_filter, case=False, na=False)]
 
-    hybrid_df = hybrid_df.sort_values(by=['hybrid_score', 'avg_rating', 'num_of_ratings'], ascending=[False, False, False])
+    hybrid_df = hybrid_df.sort_values(
+        by=['hybrid_score', 'avg_rating', 'num_of_ratings'],
+        ascending=[False, False, False]
+    )
     
     top_results = hybrid_df.head(top_n).copy()
     top_results['hybrid_score'] = (top_results['hybrid_score'] * 100).round(1)
@@ -273,6 +382,7 @@ def get_hybrid_recommendations(target_title, structures, alpha=0.5, min_ratings=
 def get_user_personalized_recommendations(user_id, structures, raw_data, alpha=0.5, min_ratings=15, top_n=10):
     """
     Generates personalized hybrid recommendations for an existing user based on their rating history.
+    Blends the user's Content Taste Vector with Collaborative Baseline Biases.
     """
     movie_stats = structures['movie_stats']
     tfidf_matrix = structures['tfidf_matrix']
@@ -288,7 +398,7 @@ def get_user_personalized_recommendations(user_id, structures, raw_data, alpha=0
     if liked_ratings.empty:
         liked_ratings = user_ratings
 
-    # 1. Content User Profile Vector
+    # 1. Content User Profile Vector (Weighted centroid of liked movies)
     liked_indices = [title_to_idx[t] for t in liked_ratings['title'] if t in title_to_idx]
     liked_weights = liked_ratings[liked_ratings['title'].isin(title_to_idx.keys())]['rating'].values
 
@@ -320,7 +430,10 @@ def get_user_personalized_recommendations(user_id, structures, raw_data, alpha=0
     if min_ratings > 0:
         cand_df = cand_df[cand_df['num_of_ratings'] >= min_ratings]
 
-    cand_df = cand_df.sort_values(by=['hybrid_score', 'avg_rating', 'num_of_ratings'], ascending=[False, False, False])
+    cand_df = cand_df.sort_values(
+        by=['hybrid_score', 'avg_rating', 'num_of_ratings'],
+        ascending=[False, False, False]
+    )
     
     top_results = cand_df.head(top_n).copy()
     top_results['hybrid_score'] = (top_results['hybrid_score'] * 100).round(1)
@@ -336,8 +449,8 @@ def get_user_personalized_recommendations(user_id, structures, raw_data, alpha=0
 
 def evaluate_models(data, test_size=0.2, random_state=42, relevance_threshold=3.5, alpha=0.5):
     """
-    Evaluates Baselines, Content-Based, Collaborative Filtering, and Hybrid Models
-    on an 80/20 train-test split.
+    Evaluates Baselines, Content-Based Proxy, Collaborative Filtering, and Hybrid Models
+    on an 80/20 train-test partition using error metrics and Top-N classification metrics.
     """
     train_df, test_df = train_test_split(data, test_size=test_size, random_state=random_state)
     
@@ -348,7 +461,7 @@ def evaluate_models(data, test_size=0.2, random_state=42, relevance_threshold=3.
     # 1. Global Mean Baseline
     pred_global = np.full(len(test_df), global_mean)
     
-    # 2. Movie Mean Baseline
+    # 2. Movie Mean Baseline (Item Metadata Proxy)
     pred_movie = np.array([movie_means.get(m, global_mean) for m in test_df['movieId']])
     
     # 3. User Mean Baseline
@@ -447,3 +560,32 @@ def load_survey_responses():
         return default_seed
         
     return pd.read_csv(SURVEY_FILE)
+
+
+# ======================================================================================
+# CLI STANDALONE DEMONSTRATION & TEST HARNESS
+# ======================================================================================
+if __name__ == '__main__':
+    print("=" * 80)
+    print("   TARUMT AI - Hybrid Movie Recommender System (module_hybrid.py)")
+    print("=" * 80)
+    print(f"[*] Loading dataset from '{DATASET_FILE}'...")
+    data = load_dataset()
+    print(f"[+] Loaded {len(data):,} ratings across {data['movieId'].nunique():,} unique movies.")
+    
+    print("\n[*] Building Hybrid Data Structures & Content Soup...")
+    structures = build_engine_structures(data)
+    print(f"[+] Structures ready. Matrix shape: {structures['user_movie_matrix'].shape}")
+    
+    target = 'Toy Story'
+    print(f"\n[*] Generating Sample Hybrid Recommendations for '{target}' (alpha=0.5)...")
+    recs, err = get_hybrid_recommendations(target, structures, alpha=0.5, top_n=5)
+    if err:
+        print(f"[!] Error: {err}")
+    else:
+        print(recs[['title', 'hybrid_score', 'cb_score', 'cf_score', 'avg_rating', 'genres']])
+        
+    print("\n[*] Running 80/20 Train-Test Evaluation...")
+    eval_df, n_tr, n_te = evaluate_models(data)
+    print(eval_df.to_string(index=False))
+    print("\n[+] Done!")
