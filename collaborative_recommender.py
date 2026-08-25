@@ -35,15 +35,18 @@ warnings.filterwarnings('ignore')
 # 1. DATA LOADING MODULE
 # ======================================================================================
 
-def load_dataset(dataset_file='merged_dataset.csv'):
+def load_dataset(dataset_file='merged_movies_ratings.csv'):
     """
-    Loads the pre-merged MovieLens dataset ('merged_dataset.csv').
+    Loads the merged MovieLens dataset ('merged_movies_ratings.csv').
     """
     try:
         if not os.path.exists(dataset_file):
-            print(f"[!] Error: Dataset file '{dataset_file}' not found.")
-            print("    Please ensure 'merged_dataset.csv' exists in the current directory.")
-            return None
+            if os.path.exists('merged_movies_ratings.csv'):
+                dataset_file = 'merged_movies_ratings.csv'
+            else:
+                print(f"[!] Error: Dataset file '{dataset_file}' not found.")
+                print("    Please ensure 'merged_movies_ratings.csv' exists in the current directory.")
+                return None
             
         print(f"[+] Loading dataset from '{dataset_file}'...")
         data = pd.read_csv(dataset_file)

@@ -5,7 +5,7 @@
 ========================================================================================
 Description:
     State-of-the-Art Streamlit Web Application for Hybrid Movie Recommendations.
-    Uses module_hybrid.py with merged_dataset.csv (ignoring imdbId and tmdbId).
+    Uses module_hybrid.py with merged_movies_ratings.csv.
     Features:
       1. Dual Engine: Movie-to-Movie Discovery & User-Personalized Recommendations.
       2. Dynamic Alpha Control (Content-Based vs Collaborative Filtering Balance).
@@ -175,7 +175,7 @@ st.markdown("""
 # ======================================================================================
 @st.cache_data(show_spinner="🎬 Loading MovieLens Dataset...")
 def get_cached_dataset():
-    return module_hybrid.load_dataset('merged_dataset.csv')
+    return module_hybrid.load_dataset('merged_movies_ratings.csv')
 
 @st.cache_resource(show_spinner="⚡ Building Hybrid TF-IDF & Matrix Structures...")
 def get_cached_structures(data):
@@ -469,10 +469,10 @@ with tab2:
     
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.markdown("""
+        st.markdown(f"""
         <div class="metric-card">
             <div style="color: #94A3B8; font-size: 0.85rem;">Dataset Volume</div>
-            <div class="stat-number">100,836</div>
+            <div class="stat-number">{len(data):,}</div>
             <div style="color: #64748B; font-size: 0.75rem;">Total MovieLens Ratings</div>
         </div>
         """, unsafe_allow_html=True)
