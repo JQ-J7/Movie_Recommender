@@ -198,6 +198,115 @@ def search_movies(query, titles_list, movie_stats, max_results=5):
 # 3. ITEM-BASED COLLABORATIVE FILTERING RECOMMENDER ENGINE
 # ======================================================================================
 
+class CollaborativeRecommender:
+    """
+    Item-Based Collaborative Filtering Recommender Engine using Pearson Correlation.
+    Supports model fitting, movie-to-movie similarity scoring, hybrid score generation,
+    catalog searching, and system evaluation.
+    """
+    def __init__(self, min_ratings=50, min_overlap=15):
+        self.min_ratings = min_ratings
+        self.min_overlap = min_overlap
+        self.data = None
+        self.user_movie_matrix = None
+        self.movie_stats = None
+        self.titles_list = []
+
+    def fit(self, data):
+        """
+        Builds the User-Item rating matrix and movie statistics from dataset.
+        """
+        self.data = data
+        self.user_movie_matrix, self.movie_stats = build_recommender_matrix(data)
+        if self.movie_stats is not None and 'title' in self.movie_stats.columns:
+            self.titles_list = self.movie_stats['title'].tolist()
+        return self
+
+    def compute_similarity_scores(self, target_title, min_overlap=None):
+        """
+        Computes normalized Pearson similarity scores [0.0, 1.0] for a target movie
+        against all catalog movies. (Designed specifically for Hybrid Fusion).
+        """
+        if min_overlap is None:
+            min_overlap = self.min_overlap
+
+        if self.movie_stats is None or self.user_movie_matrix is None:
+            return pd.Series(dtype=float)
+
+        all_titles = self.movie_stats['title']
+        cf_scores = pd.Series(0.0, index=all_titles)
+
+        if target_title not in self.user_movie_matrix.columns:
+            return cf_scores
+
+        target_ratings = self.user_movie_matrix[target_title]
+        target_mask = target_ratings.notna()
+
+        # Filter candidates by minimum ratings for speed and statistical significance
+        candidate_titles = self.movie_stats[self.movie_stats['num_of_ratings'] >= min(5, self.min_ratings)]['title']
+        candidate_cols = [c for c in candidate_titles if c in self.user_movie_matrix.columns]
+        candidate_matrix = self.user_movie_matrix[candidate_cols]
+
+        corrs = {}
+        for col in candidate_matrix.columns:
+            if col == target_title:
+                continue
+            col_ratings = candidate_matrix[col]
+            common = target_mask & col_ratings.notna()
+            if common.sum() >= min_overlap:
+                x = target_ratings[common]
+                y = col_ratings[common]
+                if len(np.unique(x)) > 1 and len(np.unique(y)) > 1:
+                    r = np.corrcoef(x, y)[0, 1]
+                    if not np.isnan(r):
+                        # Normalize Pearson r from [-1, 1] to [0, 1]
+                        corrs[col] = (r + 1.0) / 2.0
+
+        for col, score in corrs.items():
+            if col in cf_scores.index:
+                cf_scores[col] = score
+
+        return cf_scores
+
+    def get_similar_movies(self, movie_title, top_n=10, min_ratings=None, min_overlap=None):
+        """
+        Generates top-N movie recommendations using Item-Based Collaborative Filtering.
+        """
+        m_ratings = min_ratings if min_ratings is not None else self.min_ratings
+        m_overlap = min_overlap if min_overlap is not None else self.min_overlap
+        return get_collaborative_recommendations(
+            movie_title,
+            self.user_movie_matrix,
+            self.movie_stats,
+            min_ratings=m_ratings,
+            min_overlap=m_overlap,
+            top_n=top_n
+        )
+
+    def search(self, query, max_results=5):
+        """
+        Searches movies matching query in catalog.
+        """
+        if self.movie_stats is None:
+            return []
+        return search_movies(query, self.titles_list, self.movie_stats, max_results=max_results)
+
+    def evaluate(self, test_size=0.2, random_state=42, relevance_threshold=3.5, top_k=10):
+        """
+        Runs offline evaluation using 80/20 train-test split.
+        """
+        if self.data is None:
+            print("[!] Model must be fitted with dataset before running evaluation.")
+            return None
+        return evaluate_recommender_system(
+            self.data,
+            test_size=test_size,
+            random_state=random_state,
+            relevance_threshold=relevance_threshold,
+            top_k=top_k
+        )
+
+
 def get_collaborative_recommendations(movie_title, user_movie_matrix, movie_stats, min_ratings=50, min_overlap=15, top_n=10):
     """
     Generates movie recommendations using Item-Based Collaborative Filtering (Pearson Correlation).
