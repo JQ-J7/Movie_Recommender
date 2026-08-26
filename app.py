@@ -4,15 +4,11 @@
         Option 3: Hybrid Movie Recommender System - Interactive GUI
 ========================================================================================
 Description:
-    State-of-the-Art Streamlit Web Application for Hybrid Movie Recommendations.
-    Uses module_hybrid.py with movies_dataset.csv.
+    Streamlit Web Application for Hybrid Movie Recommendations.
     Features:
-      1. Dual Engine: Movie-to-Movie Discovery & User-Personalized Recommendations.
+      1. Dual Recommender Engine: Movie-to-Movie Discovery & User-Personalized Recommendations.
       2. Dynamic Alpha Control (Content-Based vs Collaborative Filtering Balance).
-      3. Modern Glassmorphic Cinema UI/UX.
-      4. Comprehensive Model Performance Evaluation (RMSE, MSE, MAE, Precision, Recall, F1).
-      5. Interactive User Satisfaction Questionnaire & Real-Time Analytics.
-      6. In-Depth Background Study & Project Architecture Documentation.
+      3. Interactive User Satisfaction Questionnaire & Real-Time Analytics.
 ========================================================================================
 """
 
@@ -22,7 +18,7 @@ import numpy as np
 import module_hybrid
 
 # ======================================================================================
-# PAGE CONFIGURATION & STYLING
+# PAGE CONFIGURATION & HIGH-END CINEMATIC THEME
 # ======================================================================================
 st.set_page_config(
     page_title="CineMatch AI | Hybrid Recommender Studio",
@@ -31,7 +27,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom High-End Dark Cinematic Theme CSS
+# Custom High-End Dark Glassmorphic Cinema Theme CSS
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600&display=swap');
@@ -42,16 +38,16 @@ st.markdown("""
     
     .main-header {
         background: linear-gradient(135deg, #1E1B4B 0%, #312E81 50%, #4338CA 100%);
-        padding: 2.2rem 2.5rem;
+        padding: 2rem 2.5rem;
         border-radius: 18px;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
         color: white;
-        margin-bottom: 2rem;
+        margin-bottom: 1.8rem;
         border: 1px solid rgba(255, 255, 255, 0.12);
     }
     
     .main-header h1 {
-        font-size: 2.6rem;
+        font-size: 2.5rem;
         font-weight: 800;
         margin: 0;
         letter-spacing: -0.5px;
@@ -61,14 +57,14 @@ st.markdown("""
     }
     
     .main-header p {
-        font-size: 1.05rem;
+        font-size: 1.02rem;
         color: #C7D2FE;
-        margin-top: 0.5rem;
+        margin-top: 0.4rem;
         margin-bottom: 0;
     }
     
     .movie-card {
-        background: rgba(30, 41, 59, 0.7);
+        background: rgba(30, 41, 59, 0.75);
         border: 1px solid rgba(255, 255, 255, 0.1);
         backdrop-filter: blur(12px);
         border-radius: 14px;
@@ -158,14 +154,6 @@ st.markdown("""
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
-    
-    .doc-section {
-        background: rgba(30, 41, 59, 0.5);
-        border-radius: 12px;
-        padding: 1.5rem;
-        border-left: 4px solid #6366F1;
-        margin-bottom: 1.5rem;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -180,14 +168,6 @@ def get_cached_dataset():
 @st.cache_resource(show_spinner="⚡ Building Hybrid TF-IDF & Matrix Structures...")
 def get_cached_structures(data):
     return module_hybrid.build_engine_structures(data)
-
-@st.cache_data(show_spinner="📊 Running 80/20 Train-Test Model Evaluation...")
-def get_cached_evaluation(data, alpha):
-    return module_hybrid.evaluate_models(data, alpha=alpha)
-
-@st.cache_data(show_spinner="📈 Calculating Alpha Sensitivity Table (0.0 to 1.0)...")
-def get_cached_alpha_sensitivity(data, cache_version="v2_top10"):
-    return module_hybrid.evaluate_alpha_sensitivity(data, step=0.1)
 
 try:
     data = get_cached_dataset()
@@ -217,7 +197,7 @@ with st.sidebar:
         max_value=1.0,
         value=0.50,
         step=0.05,
-        help="0.0 = Pure Collaborative Filtering (User ratings correlation) | 1.0 = Pure Content-Based Filtering (Genres & Tags TF-IDF)"
+        help="0.0 = Pure Collaborative Filtering (User co-ratings) | 1.0 = Pure Content-Based Filtering (Genres & Tags TF-IDF)"
     )
     
     col_a, col_b = st.columns(2)
@@ -263,13 +243,11 @@ st.markdown("""
 
 
 # ======================================================================================
-# MAIN NAVIGATION TABS
+# MAIN NAVIGATION TABS (REVIEWS & SATISFACTION ONLY)
 # ======================================================================================
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2 = st.tabs([
     "🍿 Interactive Recommender",
-    "📊 Model Benchmarks & Evaluation",
-    "📝 User Satisfaction Survey",
-    "📖 Background Study & System Docs"
+    "📝 User Satisfaction Questionnaire"
 ])
 
 
@@ -454,132 +432,11 @@ with tab1:
 
 
 # ======================================================================================
-# TAB 2: MODEL BENCHMARKS & EVALUATION
+# TAB 2: USER SATISFACTION QUESTIONNAIRE
 # ======================================================================================
 with tab2:
-    st.markdown("### 📊 Model Performance & Statistical Evaluation (80/20 Train-Test)")
-    st.write("Comprehensive benchmarking assessing predictive rating accuracy and classification quality across baseline, collaborative filtering, content proxy, and hybrid models.")
-    
-    eval_df, n_train, n_test = get_cached_evaluation(data, alpha)
-    
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div style="color: #94A3B8; font-size: 0.85rem;">Dataset Volume</div>
-            <div class="stat-number">{len(data):,}</div>
-            <div style="color: #64748B; font-size: 0.75rem;">Total MovieLens Ratings</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with c2:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div style="color: #94A3B8; font-size: 0.85rem;">Training Partition</div>
-            <div class="stat-number">{n_train:,}</div>
-            <div style="color: #64748B; font-size: 0.75rem;">80% Training Split</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with c3:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div style="color: #94A3B8; font-size: 0.85rem;">Testing Partition</div>
-            <div class="stat-number">{n_test:,}</div>
-            <div style="color: #64748B; font-size: 0.75rem;">20% Holdout Split</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with c4:
-        hybrid_f1 = eval_df[eval_df['Model / Architecture'].str.contains('Hybrid')]['F1-Score (%)'].values[0]
-        st.markdown(f"""
-        <div class="metric-card">
-            <div style="color: #94A3B8; font-size: 0.85rem;">Hybrid F1-Score</div>
-            <div class="stat-number">{hybrid_f1}%</div>
-            <div style="color: #64748B; font-size: 0.75rem;">Top-N Classification</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.markdown("#### 📋 Comprehensive Evaluation Benchmark Table")
-    st.dataframe(
-        eval_df.style.highlight_min(subset=['MSE', 'RMSE', 'MAE'], color='#1E3A8A')
-                     .highlight_max(subset=['Precision (%)', 'Recall (%)', 'F1-Score (%)', 'Accuracy (%)'], color='#065F46')
-    )
-    
-    st.markdown("---")
-    st.markdown("#### 📈 Visual Metric Comparisons")
-    
-    chart_col1, chart_col2 = st.columns(2)
-    with chart_col1:
-        st.markdown("##### 📉 Rating Prediction Errors (Lower is Better)")
-        error_chart_data = eval_df.set_index('Model / Architecture')[['RMSE', 'MSE', 'MAE']]
-        st.bar_chart(error_chart_data)
-        
-    with chart_col2:
-        st.markdown("##### 🎯 Classification Metrics (%) (Higher is Better)")
-        class_chart_data = eval_df.set_index('Model / Architecture')[['Precision (%)', 'Recall (%)', 'F1-Score (%)']]
-        st.bar_chart(class_chart_data)
-        
-    st.markdown("---")
-    st.markdown("#### ⚖️ Alpha Sensitivity Table (Top-10 Ranking Metrics)")
-    st.write("Measures **Precision@10**, **Recall@10**, **F1@10**, and **NDCG@10** across different alpha weights from 0.0 to 1.0 (step = 0.1).")
-    
-    alpha_sens_df = get_cached_alpha_sensitivity(data, cache_version="v2_top10")
-    
-    alpha_col = 'alpha' if 'alpha' in alpha_sens_df.columns else alpha_sens_df.columns[0]
-    highlight_cols = [c for c in ['precision@10', 'recall@10', 'f1@10', 'ndcg@10'] if c in alpha_sens_df.columns]
-    
-    if highlight_cols:
-        styled_table = alpha_sens_df.style.highlight_max(subset=highlight_cols, color='#065F46')
-    else:
-        styled_table = alpha_sens_df
-        
-    st.dataframe(styled_table, use_container_width=True)
-    
-    # Alpha Sensitivity Visual Trends
-    col_a_chart1, col_a_chart2 = st.columns(2)
-    prf_cols = [c for c in ['precision@10', 'recall@10', 'f1@10'] if c in alpha_sens_df.columns]
-    if prf_cols:
-        with col_a_chart1:
-            st.markdown("##### 🎯 Precision, Recall & F1 @ 10 vs. Alpha")
-            alpha_chart_prf = alpha_sens_df.set_index(alpha_col)[prf_cols]
-            st.line_chart(alpha_chart_prf)
-            
-    if 'ndcg@10' in alpha_sens_df.columns:
-        with col_a_chart2:
-            st.markdown("##### 📊 NDCG@10 Ranking Quality vs. Alpha")
-            alpha_chart_ndcg = alpha_sens_df.set_index(alpha_col)[['ndcg@10']]
-            st.line_chart(alpha_chart_ndcg)
-        
-    st.markdown("""
-    <div style="background: rgba(99, 102, 241, 0.1); border-left: 4px solid #818CF8; border-radius: 8px; padding: 1rem; margin-top: 1rem; margin-bottom: 1.5rem;">
-        <h5 style="margin: 0 0 0.4rem 0; color: #C7D2FE;">💡 Key Sensitivity Insights</h5>
-        <ul style="margin: 0; padding-left: 1.2rem; color: #E2E8F0; font-size: 0.9rem;">
-            <li><b>Peak Ranking Quality (α ≈ 0.1 – 0.2):</b> Integrating 10%–20% Content-Based filtering with 80%–90% Collaborative Filtering achieves peak <b>Precision@10 (0.7317)</b>, <b>F1@10 (0.6180)</b>, and <b>NDCG@10 (0.8480)</b>.</li>
-            <li><b>Collaborative Filtering Dominance:</b> Collaborative filtering provides strong personalized discrimination among movies.</li>
-            <li><b>Content-Based Synergy:</b> Adding semantic metadata (genres, keywords, synopsis) refines the top of the recommendation list, elevating NDCG@10 from 0.8436 to 0.8480.</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    with st.expander("📚 Metric Definitions & Academic Explanation"):
-        st.markdown("""
-        - **Root Mean Squared Error (RMSE)**: Penalizes large prediction errors more severely by taking the square root of the average squared errors:
-          $$\\text{RMSE} = \\sqrt{\\frac{1}{|T|} \\sum_{(u, i) \\in T} (r_{u, i} - \\hat{r}_{u, i})^2}$$
-        - **Mean Squared Error (MSE)**: The average squared difference between estimated ratings and actual ratings.
-        - **Mean Absolute Error (MAE)**: Measures average absolute magnitude of errors without penalizing outliers disproportionately.
-        - **Precision@K**: The proportion of recommended items that are actually relevant (Rating $\\ge 3.5$):
-          $$\\text{Precision} = \\frac{TP}{TP + FP}$$
-        - **Recall@K**: The proportion of relevant items successfully recommended:
-          $$\\text{Recall} = \\frac{TP}{TP + FN}$$
-        - **F1-Score**: Harmonic mean of Precision and Recall, providing a balanced assessment of recommendation quality.
-        """)
-
-
-# ======================================================================================
-# TAB 3: USER SATISFACTION QUESTIONNAIRE
-# ======================================================================================
-with tab3:
     st.markdown("### 📝 User Satisfaction Questionnaire & Feedback")
-    st.write("Gather subjective qualitative and quantitative user feedback to assess user experience, serendipity, and satisfaction as required in part (d)(iii).")
+    st.write("Gather subjective qualitative and quantitative user feedback to assess user experience, serendipity, and recommendation satisfaction.")
     
     col_form, col_stats = st.columns([1.2, 1])
     
@@ -640,71 +497,3 @@ with tab3:
                 st.dataframe(survey_df)
         else:
             st.info("No survey responses recorded yet. Fill out the form on the left to submit the first review!")
-
-
-# ======================================================================================
-# TAB 4: BACKGROUND STUDY & ACADEMIC DOCUMENTATION
-# ======================================================================================
-with tab4:
-    st.markdown("### 📖 Background Study & System Documentation")
-    st.write("Comprehensive academic report addressing the requirement specifications (Parts a, b, c, and d).")
-    
-    st.markdown("""
-    <div class="doc-section">
-        <h3>1. Real-Life Problem Scenario (Requirement a)</h3>
-        <p>
-            In modern on-demand digital entertainment platforms (e.g., Netflix, Disney+, Prime Video, Letterboxd), users are faced with tens of thousands of media titles—a phenomenon known as <b>choice overload</b> or the <b>paradox of choice</b>.
-        </p>
-        <p>
-            Without an intelligent recommender system, user engagement drops due to decision fatigue. The objective of this project is to build an automated recommendation engine that continuously learns user tastes and provides relevant, novel, and diverse movie suggestions.
-        </p>
-    </div>
-    
-    <div class="doc-section">
-        <h3>2. Background Study & System Architecture (Requirement b)</h3>
-        <h4>A. Pure Content-Based Filtering (CBF) Limitations</h4>
-        <ul>
-            <li><b>Overspecialization:</b> Recommends only items identical to what the user already consumed (creates an "information bubble").</li>
-            <li><b>Cold-Start for New Users:</b> Relies solely on metadata and cannot leverage wisdom of the crowd.</li>
-        </ul>
-        
-        <h4>B. Pure Collaborative Filtering (CF) Limitations</h4>
-        <ul>
-            <li><b>Cold-Start for New Items:</b> Unrated new movies cannot be recommended because they have zero user interaction vectors.</li>
-            <li><b>Sparsity Problem:</b> In large catalogs, the User-Item matrix is over 98% sparse, reducing correlation accuracy.</li>
-        </ul>
-        
-        <h4>C. The Proposed Solution: Weighted Hybrid Recommender System</h4>
-        <p>
-            Our Hybrid Recommender harmonizes both paradigms using a dynamic weighted linear combination:
-        </p>
-        <div style="background: rgba(15, 23, 42, 0.8); padding: 1rem; border-radius: 8px; font-family: monospace; color: #818CF8; font-size: 1rem; text-align: center;">
-            Score<sub>Hybrid</sub>(u, i) = α · Score<sub>Content</sub>(u, i) + (1 - α) · Score<sub>Collaborative</sub>(u, i)
-        </div>
-        <p style="margin-top: 0.8rem;">
-            Where:
-            <ul>
-                <li><b>α (Alpha ∈ [0, 1]):</b> User-tunable weight parameter controlling the bias between semantic feature similarity and collaborative crowd patterns.</li>
-                <li><b>Score<sub>Content</sub>:</b> TF-IDF vectorization with unigram/bigram tokenization on genres and user tags, measured via Cosine Similarity.</li>
-                <li><b>Score<sub>Collaborative</sub>:</b> Pearson Correlation Coefficient across co-rated user rating vectors with bias adjustments.</li>
-            </ul>
-        </p>
-    </div>
-    
-    <div class="doc-section">
-        <h3>3. Expected Functionalities and Benefits (Requirement b.iii)</h3>
-        <ul>
-            <li><b>Mitigates Cold-Start:</b> New movies with no ratings can still be discovered via their genre/tag TF-IDF signatures (α → 1.0).</li>
-            <li><b>Serendipity & Discovery:</b> Collaborative filtering introduces cross-genre unexpected gems that users with similar tastes enjoyed (α → 0.0).</li>
-            <li><b>Interactive Control:</b> The Streamlit GUI empowers users to tune their own discovery preference in real time.</li>
-            <li><b>Dual Recommendation Modes:</b> Supports both title-to-title exploratory matching and user-profile personalized recommendations.</li>
-        </ul>
-    </div>
-    
-    <div class="doc-section">
-        <h3>4. System Evaluation Summary (Requirement d)</h3>
-        <p>
-            The system is rigorously benchmarked on an 80/20 train-test split across predictive accuracy metrics (RMSE, MSE, MAE) and ranking classification metrics (Precision, Recall, F1-Score), complemented by an interactive 5-point Likert scale user satisfaction survey.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
