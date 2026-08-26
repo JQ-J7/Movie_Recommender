@@ -403,8 +403,7 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     headers_1 = ["Error Metric", "Score Value", "Percentage"]
     rows_1 = [
         ["Mean Squared Error (MSE)", f"{mse:.4f}", f"{(mse / 5.0)*100:.2f}%"],
-        ["Root Mean Squared Error (RMSE)", f"{rmse:.4f}", f"{(rmse / 5.0)*100:.2f}%"],
-        ["Mean Absolute Error (MAE)", f"{mae:.4f}", f"{(mae / 5.0)*100:.2f}%"]
+        ["Root Mean Squared Error (RMSE)", f"{rmse:.4f}", f"{(rmse / 5.0)*100:.2f}%"]
     ]
     print_ascii_table(headers_1, rows_1, alignments=['left', 'center', 'center'])
     
@@ -414,8 +413,7 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     rows_2 = [
         [f"Precision@{top_k}", f"{mean_prec:.4f}", f"{mean_prec*100:.2f}%"],
         [f"Recall@{top_k}", f"{mean_rec:.4f}", f"{mean_rec*100:.2f}%"],
-        [f"F1-Score@{top_k}", f"{mean_f1:.4f}", f"{mean_f1*100:.2f}%"],
-        [f"Avg Hits in Top-{top_k}", f"{avg_hits:.2f}", f"{(avg_hits / top_k)*100:.2f}%"]
+        [f"F1-Score@{top_k}", f"{mean_f1:.4f}", f"{mean_f1*100:.2f}%"]
     ]
     print_ascii_table(headers_2, rows_2, alignments=['left', 'center', 'center'])
     print("="*75 + "\n")
