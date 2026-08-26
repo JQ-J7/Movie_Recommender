@@ -1,16 +1,17 @@
+"""
 ========================================================================================
              TARUMT - ARTIFICIAL INTELLIGENCE (AI) REPOSITORY
          Content-Based Filtering (CBF) Movie Recommender System
 ========================================================================================
 Description:
     Content-Based Movie Recommender Engine using TF-IDF and Cosine Similarity
-    on metadata (genres, keywords,and plot overview).
+    on metadata (genres, keywords, cast, director, and plot overview).
 
 Key Features:
     1. Weighted Metadata Vectorization (TF-IDF & Cosine Similarity).
     2. Intelligent Search Engine (Exact, Substring, Fuzzy & Article Normalization).
     3. Top-10 Similar Movie Recommendations with Token-level Explainability.
-    4. Comprehensive Offline Evaluation (80/20 Split: RMSE, MAE, Precision, Recall, F1).
+    4. Comprehensive Offline Evaluation (80/20 Split: MSE, RMSE, Precision@K, Recall@K, F1@K).
     5. Interactive Console Interface & Metadata Analytics.
 ========================================================================================
 """
@@ -564,8 +565,8 @@ def evaluate_content_based_system(cbf_model, data, test_size=0.2, random_state=4
     Conducts comprehensive offline evaluation of the Content-Based Filtering Recommender:
     - Step 1: Data split (80/20)
     - Step 2: Training CBF Model on Train set
-    - Step 3: Evaluating Predictions (MSE, RMSE, MAE)
-    - Step 4: Evaluating Ranking & Classification Metrics (Precision, Recall, F1)
+    - Step 3: Evaluating Predictions (MSE, RMSE)
+    - Step 4: Evaluating Ranking & Classification Metrics (Precision@K, Recall@K, F1@K)
     """
     print("\nLoading dataset for evaluation...")
     print(f"Splitting data into Train and Test sets ({int((1-test_size)*100)}/{int(test_size*100)})...")
@@ -638,12 +639,11 @@ def evaluate_content_based_system(cbf_model, data, test_size=0.2, random_state=4
             
         cb_preds[i] = float(np.clip(predicted, 0.5, 5.0))
     
-    # Calculate Prediction Errors
+    # Calculate Prediction Errors (MSE, RMSE)
     mse_cb = mean_squared_error(actuals, cb_preds)
     rmse_cb = sqrt(mse_cb)
-    mae_cb = mean_absolute_error(actuals, cb_preds)
     
-    print("Evaluating Ranking Metrics (Precision, Recall, F1)...")
+    print(f"Evaluating Ranking Metrics (Precision@{k}, Recall@{k}, F1@{k})...")
     actual_binary = (actuals >= relevance_threshold).astype(int)
     pred_binary = (cb_preds >= relevance_threshold).astype(int)
     
@@ -655,30 +655,25 @@ def evaluate_content_based_system(cbf_model, data, test_size=0.2, random_state=4
     prec_class = tp / (tp + fp) if (tp + fp) > 0 else 0
     rec_class = tp / (tp + fn) if (tp + fn) > 0 else 0
     f1_class = 2 * (prec_class * rec_class) / (prec_class + rec_class) if (prec_class + rec_class) > 0 else 0
-    acc_class = (tp + tn) / len(actual_binary) if len(actual_binary) > 0 else 0
     
     # Display formatted Evaluation Results
     print("\n--- Evaluation Results ---")
-    print(f"MSE:        {mse_cb:.4f}")
-    print(f"RMSE:       {rmse_cb:.4f}")
-    print(f"MAE:        {mae_cb:.4f}")
-    print(f"Precision:  {prec_class:.4f}")
-    print(f"Recall:     {rec_class:.4f}")
-    print(f"F1 Score:   {f1_class:.4f}")
+    print(f"MSE:          {mse_cb:.4f}")
+    print(f"RMSE:         {rmse_cb:.4f}")
+    print(f"Precision@{k}: {prec_class:.4f}")
+    print(f"Recall@{k}:    {rec_class:.4f}")
+    print(f"F1@{k}:        {f1_class:.4f}")
     print("--------------------------\n")
     
     # Render neat Boxed Table with column dividers
     results_table = pd.DataFrame([
         {"Metric": "MSE (Mean Squared Error)", "Score": f"{mse_cb:.4f}"},
         {"Metric": "RMSE (Root Mean Squared Error)", "Score": f"{rmse_cb:.4f}"},
-        {"Metric": "MAE (Mean Absolute Error)", "Score": f"{mae_cb:.4f}"},
-        {"Metric": "Precision (Relevant Recommendations)", "Score": f"{prec_class:.4f} ({prec_class*100:.2f}%)"},
-        {"Metric": "Recall (Discovered User Favorites)", "Score": f"{rec_class:.4f} ({rec_class*100:.2f}%)"},
-        {"Metric": "F1-Score (Harmonic Mean)", "Score": f"{f1_class:.4f} ({f1_class*100:.2f}%)"},
-        {"Metric": "Classification Accuracy", "Score": f"{acc_class:.4f} ({acc_class*100:.2f}%)"},
-        {"Metric": "Item Cold-Start Resilience", "Score": "100% (No user ratings needed)"}
+        {"Metric": f"Precision@{k} (Relevant Recommendations)", "Score": f"{prec_class:.4f} ({prec_class*100:.2f}%)"},
+        {"Metric": f"Recall@{k} (Discovered User Favorites)", "Score": f"{rec_class:.4f} ({rec_class*100:.2f}%)"},
+        {"Metric": f"F1@{k} (Harmonic Mean)", "Score": f"{f1_class:.4f} ({f1_class*100:.2f}%)"}
     ])
-    print_ascii_table(results_table, max_col_widths={'Metric': 38, 'Score': 34})
+    print_ascii_table(results_table, max_col_widths={'Metric': 42, 'Score': 32})
 
 
 # ======================================================================================
@@ -894,7 +889,7 @@ def main():
         print("-"*50)
         print("[1] Search for a movie")
         print("[2] Get recommendations by movie")
-        print("[3] Run Recommender System Evaluation (RMSE/MSE/Precision/Recall/F1)")
+        print("[3] Run Recommender System Evaluation (MSE/RMSE/Precision@K/Recall@K/F1@K)")
         print("[0] Exit")
         print("-"*50)
         
