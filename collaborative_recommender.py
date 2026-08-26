@@ -427,7 +427,7 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
 
 def display_dataset_summary(data):
     """
-    Displays comprehensive statistics and dataset properties.
+    Displays comprehensive statistics and dataset properties, including Top-10 Collaborative Recommendations.
     """
     print("\n" + "="*75)
     print("              [ANALYTICS] DATASET SUMMARY & EXPLORATORY METRICS")
@@ -438,27 +438,44 @@ def display_dataset_summary(data):
     num_movies = data['movieId'].nunique()
     total_possible = num_users * num_movies
     sparsity = (1.0 - (num_ratings / total_possible)) * 100
+    global_mean = data['rating'].mean()
     
     print(f"Total User Ratings   : {num_ratings:,}")
     print(f"Unique Users         : {num_users:,}")
     print(f"Unique Movies        : {num_movies:,}")
     print(f"Rating Scale         : {data['rating'].min()} to {data['rating'].max()} stars")
-    print(f"Average Rating       : {data['rating'].mean():.2f} stars")
+    print(f"Average Rating       : {global_mean:.2f} stars")
     print(f"Rating Matrix Size   : {num_users} x {num_movies} ({total_possible:,} cells)")
     print(f"Matrix Sparsity      : {sparsity:.2f}% (Standard in Recommender Systems)")
     
-    print("\nTop 5 Most Rated Movies:")
-    top_rated = data.groupby('title').agg(
+    genre_col = 'genres_clean' if 'genres_clean' in data.columns else 'genres'
+    movie_stats = data.groupby('title').agg(
         num_ratings=('rating', 'count'),
-        avg_rating=('rating', 'mean')
-    ).sort_values('num_ratings', ascending=False).head(5).reset_index()
+        avg_rating=('rating', 'mean'),
+        genres=(genre_col, 'first')
+    ).reset_index()
     
-    headers_top = ["#", "Movie Title", "Ratings Count", "Average Rating"]
-    rows_top = [
-        [str(i), row['title'], f"{int(row['num_ratings']):,}", f"{row['avg_rating']:.2f} / 5.0"]
-        for i, row in enumerate(top_rated.to_dict('records'), 1)
-    ]
-    print_ascii_table(headers_top, rows_top, alignments=['center', 'left', 'right', 'center'])
+    # Top 10 Collaborative Recommended Movies (Bayesian Quality Weighted, Min 50 Ratings)
+    m = 50  # minimum rating count threshold
+    v = movie_stats['num_ratings']
+    R = movie_stats['avg_rating']
+    C = global_mean
+    movie_stats['weighted_score'] = (v / (v + m)) * R + (m / (v + m)) * C
+    
+    top_collab = movie_stats[movie_stats['num_ratings'] >= m].sort_values('weighted_score', ascending=False).head(10).reset_index(drop=True)
+    print("\n--- Top 10 Collaborative Recommended Movies (Quality Weighted, Min 50 Ratings) ---")
+    headers_collab = ["#", "Movie Title", "Ratings", "Avg Rating", "Weighted Score", "Genres"]
+    rows_collab = []
+    for i, row in enumerate(top_collab.to_dict('records'), 1):
+        title = str(row['title'])
+        if len(title) > 30:
+            title = title[:27] + "..."
+        genres_str = str(row['genres']).replace('|', ' | ') if row['genres'] else 'N/A'
+        if len(genres_str) > 32:
+            genres_str = genres_str[:29] + "..."
+        rows_collab.append([str(i), title, f"{int(row['num_ratings']):,}", f"{row['avg_rating']:.2f}/5.0", f"{row['weighted_score']:.2f}", genres_str])
+        
+    print_ascii_table(headers_collab, rows_collab, alignments=['center', 'left', 'right', 'center', 'center', 'left'])
     print("="*75 + "\n")
 
 
