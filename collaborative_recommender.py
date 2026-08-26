@@ -21,7 +21,7 @@ import os
 import re
 import difflib
 import warnings
-from math import sqrt
+from math import sqrt, log2
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -337,87 +337,87 @@ def print_recommendations_table(df):
 # 5. SYSTEM EVALUATION MODULE (RMSE, MSE, MAE, PRECISION, RECALL, F1)
 # ======================================================================================
 
-def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_threshold=3.5):
+def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_threshold=3.5, top_k=10):
     """
-    Evaluates the recommender system using an 80/20 Train-Test split.
-    Calculates:
-      1. Rating Prediction Metrics: Root Mean Squared Error (RMSE), Mean Squared Error (MSE), Mean Absolute Error (MAE).
-      2. Recommendation Quality Metrics: Precision, Recall, F1-Score, and Classification Accuracy.
+    Evaluates the recommender system using an 80/20 Train-Test split based on assignment requirements:
+      1. Rating Prediction Error (MSE, RMSE, MAE) -> Assignment Requirement 3.d.ii
+      2. Top-10 Recommendation Evaluation (Precision@10, Recall@10, F1@10, Hits) -> Assignment Requirement 3.d.i
     """
     print("\n" + "="*75)
     print("      [EVALUATION] RECOMMENDER SYSTEM ACCURACY (80/20 Train-Test Split)")
     print("="*75)
     
     train_df, test_df = train_test_split(data, test_size=test_size, random_state=random_state)
-    print(f"[*] Training Ratings : {len(train_df):,} ratings (80%)")
-    print(f"[*] Testing Ratings  : {len(test_df):,} ratings (20%)")
-    print(f"[*] Relevance Cutoff : Rating >= {relevance_threshold:.1f} stars\n")
+    print(f"[*] Training Ratings (80%) : {len(train_df):,} ratings (Model Training)")
+    print(f"[*] Testing Ratings  (20%) : {len(test_df):,} ratings (Mock Test Ground Truth)")
+    print(f"[*] Relevance Threshold    : Rating >= {relevance_threshold:.1f} stars\n")
     
     global_mean = train_df['rating'].mean()
     movie_means = train_df.groupby('movieId')['rating'].mean().to_dict()
     user_means = train_df.groupby('userId')['rating'].mean().to_dict()
     
-    # 1. Global Mean Baseline
-    pred_global = [global_mean] * len(test_df)
-    mse_global = mean_squared_error(test_df['rating'], pred_global)
-    rmse_global = sqrt(mse_global)
-    mae_global = mean_absolute_error(test_df['rating'], pred_global)
-    
-    # 2. Movie Average Baseline
-    pred_movie = [movie_means.get(m, global_mean) for m in test_df['movieId']]
-    mse_movie = mean_squared_error(test_df['rating'], pred_movie)
-    rmse_movie = sqrt(mse_movie)
-    mae_movie = mean_absolute_error(test_df['rating'], pred_movie)
-    
-    # 3. User Average Baseline
-    pred_user = [user_means.get(u, global_mean) for u in test_df['userId']]
-    mse_user = mean_squared_error(test_df['rating'], pred_user)
-    rmse_user = sqrt(mse_user)
-    mae_user = mean_absolute_error(test_df['rating'], pred_user)
-    
-    # 4. User + Movie Bias (Collaborative Baseline)
+    # 1. Rating Prediction Error (Collaborative Baseline)
     pred_combined = [
         np.clip(user_means.get(u, global_mean) + movie_means.get(m, global_mean) - global_mean, 0.5, 5.0)
         for u, m in zip(test_df['userId'], test_df['movieId'])
     ]
-    mse_combined = mean_squared_error(test_df['rating'], pred_combined)
-    rmse_combined = sqrt(mse_combined)
-    mae_combined = mean_absolute_error(test_df['rating'], pred_combined)
+    mse = mean_squared_error(test_df['rating'], pred_combined)
+    rmse = sqrt(mse)
+    mae = mean_absolute_error(test_df['rating'], pred_combined)
     
-    # Classification Metrics (Precision, Recall, F1)
-    actual_binary = (test_df['rating'] >= relevance_threshold).astype(int)
-    pred_binary = (np.array(pred_combined) >= relevance_threshold).astype(int)
+    # 2. Top-10 Recommendation Accuracy on 20% Mock Test Set
+    train_user_movies = train_df.groupby('userId')['movieId'].apply(set).to_dict()
+    test_user_relevant = test_df[test_df['rating'] >= relevance_threshold].groupby('userId')['movieId'].apply(set).to_dict()
     
-    tp = ((pred_binary == 1) & (actual_binary == 1)).sum()
-    fp = ((pred_binary == 1) & (actual_binary == 0)).sum()
-    fn = ((pred_binary == 0) & (actual_binary == 1)).sum()
-    tn = ((pred_binary == 0) & (actual_binary == 0)).sum()
+    movie_pop_stats = train_df.groupby('movieId').agg(
+        num_ratings=('rating', 'count'),
+        avg_rating=('rating', 'mean')
+    ).reset_index()
     
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-    accuracy = (tp + tn) / len(actual_binary)
+    m_threshold = 50
+    v_pop = movie_pop_stats['num_ratings']
+    R_pop = movie_pop_stats['avg_rating']
+    movie_pop_stats['score'] = (v_pop / (v_pop + m_threshold)) * R_pop + (m_threshold / (v_pop + m_threshold)) * global_mean
+    ranked_movie_ids = movie_pop_stats.sort_values('score', ascending=False)['movieId'].tolist()
     
-    # Rating Prediction Error Table
-    print("--- [A] Rating Prediction Accuracy (Lower is Better) ---")
-    headers_a = ["Predictive Model / Baseline", "MSE", "RMSE", "MAE"]
-    rows_a = [
-        ["1. Global Mean Rating", f"{mse_global:.4f}", f"{rmse_global:.4f}", f"{mae_global:.4f}"],
-        ["2. Movie Average Rating", f"{mse_movie:.4f}", f"{rmse_movie:.4f}", f"{mae_movie:.4f}"],
-        ["3. User Average Rating", f"{mse_user:.4f}", f"{rmse_user:.4f}", f"{mae_user:.4f}"],
-        ["4. User + Movie Bias (CF Baseline)", f"{mse_combined:.4f}", f"{rmse_combined:.4f}", f"{mae_combined:.4f}"]
+    precisions_k, recalls_k, total_hits = [], [], []
+    
+    for u, true_items in test_user_relevant.items():
+        if not true_items:
+            continue
+        seen_train = train_user_movies.get(u, set())
+        recs = [mid for mid in ranked_movie_ids if mid not in seen_train][:top_k]
+        
+        hits = sum(1 for mid in recs if mid in true_items)
+        total_hits.append(hits)
+        precisions_k.append(hits / top_k)
+        recalls_k.append(hits / len(true_items))
+        
+    mean_prec = np.mean(precisions_k)
+    mean_rec = np.mean(recalls_k)
+    mean_f1 = (2 * mean_prec * mean_rec) / (mean_prec + mean_rec) if (mean_prec + mean_rec) > 0 else 0
+    avg_hits = np.mean(total_hits)
+    
+    # Output Table 1: Rating Prediction Error
+    print("--- [1] Rating Prediction Error ---")
+    headers_1 = ["Error Metric", "Score Value", "Percentage"]
+    rows_1 = [
+        ["Mean Squared Error (MSE)", f"{mse:.4f}", f"{(mse / 5.0)*100:.2f}%"],
+        ["Root Mean Squared Error (RMSE)", f"{rmse:.4f}", f"{(rmse / 5.0)*100:.2f}%"],
+        ["Mean Absolute Error (MAE)", f"{mae:.4f}", f"{(mae / 5.0)*100:.2f}%"]
     ]
-    print_ascii_table(headers_a, rows_a, alignments=['left', 'center', 'center', 'center'])
+    print_ascii_table(headers_1, rows_1, alignments=['left', 'center', 'center'])
     
-    print("\n--- [B] Recommendation Classification Quality (Higher is Better) ---")
-    headers_b = ["Evaluation Metric", "Score Value", "Percentage"]
-    rows_b = [
-        ["Precision (Relevant Recommendations)", f"{precision:.4f}", f"{precision*100:.2f}%"],
-        ["Recall (Discovered Relevant Movies)", f"{recall:.4f}", f"{recall*100:.2f}%"],
-        ["F1-Score (Harmonic Mean)", f"{f1:.4f}", f"{f1*100:.2f}%"],
-        ["Classification Accuracy", f"{accuracy:.4f}", f"{accuracy*100:.2f}%"]
+    # Output Table 2: Top-10 Recommendation Quality
+    print(f"\n--- [2] Top-{top_k} Recommendation Quality (20% Mock Test) ---")
+    headers_2 = [f"Top-{top_k} Metric", "Score Value", "Percentage"]
+    rows_2 = [
+        [f"Precision@{top_k}", f"{mean_prec:.4f}", f"{mean_prec*100:.2f}%"],
+        [f"Recall@{top_k}", f"{mean_rec:.4f}", f"{mean_rec*100:.2f}%"],
+        [f"F1-Score@{top_k}", f"{mean_f1:.4f}", f"{mean_f1*100:.2f}%"],
+        [f"Avg Hits in Top-{top_k}", f"{avg_hits:.2f}", f"{(avg_hits / top_k)*100:.2f}%"]
     ]
-    print_ascii_table(headers_b, rows_b, alignments=['left', 'center', 'center'])
+    print_ascii_table(headers_2, rows_2, alignments=['left', 'center', 'center'])
     print("="*75 + "\n")
 
 
@@ -646,7 +646,7 @@ def main():
         print("="*50)
         print("  [1] Search Movie (View Details & Ratings)")
         print("  [2] Get Recommendations by Movie")
-        print("  [3] Run Recommender System Evaluation (RMSE/MAE/F1)")
+        print("  [3] Run Recommender System Evaluation (RMSE/MSE/Precision/Recall/F1)")
         print("  [4] View Dataset Summary & Statistics")
         print("  [5] Exit Application")
         print("="*50)
