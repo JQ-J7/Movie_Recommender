@@ -1,16 +1,17 @@
+"""
 ========================================================================================
              TARUMT - ARTIFICIAL INTELLIGENCE (AI) REPOSITORY
          Content-Based Filtering (CBF) Movie Recommender System
 ========================================================================================
 Description:
     Content-Based Movie Recommender Engine using TF-IDF and Cosine Similarity
-    on metadata (genres, keywords,and plot overview).
+    on metadata (genres, keywords, cast, director, and plot overview).
 
 Key Features:
     1. Weighted Metadata Vectorization (TF-IDF & Cosine Similarity).
     2. Intelligent Search Engine (Exact, Substring, Fuzzy & Article Normalization).
     3. Top-10 Similar Movie Recommendations with Token-level Explainability.
-    4. Comprehensive Offline Evaluation (80/20 Split: RMSE, MAE, Precision, Recall, F1).
+    4. Comprehensive Offline Evaluation (80/20 Split: MSE, RMSE, Precision@K, Recall@K, F1@K).
     5. Interactive Console Interface & Metadata Analytics.
 ========================================================================================
 """
@@ -559,21 +560,19 @@ def print_ascii_table(data, max_col_widths=None):
     print(sep_line)
 
 
-def evaluate_content_based_system(cbf_model, data, test_size=0.2, random_state=42, relevance_threshold=3.5, k=10, sample_users=200):
+def evaluate_content_based_system(cbf_model, data, test_size=0.2, random_state=42, relevance_threshold=3.5, k=10, num_negatives=100, max_eval_users=200):
     """
     Conducts comprehensive offline evaluation of the Content-Based Filtering Recommender:
-    - Step 1: Data split (80/20)
+    - Step 1: Data split (80/20 Train-Test)
     - Step 2: Training CBF Model on Train set
-    - Step 3: Evaluating Predictions (MSE, RMSE, MAE)
-    - Step 4: Evaluating Ranking & Classification Metrics (Precision, Recall, F1)
+    - Step 3: Evaluating Rating Predictions (MSE, RMSE)
+    - Step 4: Evaluating Top-K Ranking Metrics (Precision@K, Recall@K, F1@K) 
     """
     print("\nLoading dataset for evaluation...")
     print(f"Splitting data into Train and Test sets ({int((1-test_size)*100)}/{int(test_size*100)})...")
     train_df, test_df = train_test_split(data, test_size=test_size, random_state=random_state)
     
     print("Training the CBF Model on Train set...")
-    # Build per-user rating histories with a single fast groupby pass instead of
-    # a per-group lambda .apply(), which is slow on large datasets.
     train_user_ratings = {}
     for u, title, rating in zip(train_df['userId'], train_df['title'], train_df['rating']):
         train_user_ratings.setdefault(u, {})[title] = rating
@@ -583,12 +582,10 @@ def evaluate_content_based_system(cbf_model, data, test_size=0.2, random_state=4
     
     print("Evaluating Predictions (MSE, RMSE)...")
     
-    # Evaluate on a stratified sample of test interactions for rapid validation
+    # Stratified test sample for rapid validation
     eval_sample = test_df.sample(n=min(5000, len(test_df)), random_state=random_state)
     actuals = eval_sample['rating'].to_numpy()
     
-    # Pre-resolve each user's train-history TF-IDF sub-matrix ONCE per user
-    # (not once per test row) so repeat users don't redo the same lookup/slicing.
     user_hist_cache = {}  # userId -> (hist_matrix, hist_ratings_array, hist_title_set)
     
     def get_user_hist(u):
@@ -598,7 +595,7 @@ def evaluate_content_based_system(cbf_model, data, test_size=0.2, random_state=4
         hist_titles = [t for t in user_history if t in cbf_model.title_to_idx]
         if hist_titles:
             hist_idxs = [cbf_model.title_to_idx[t] for t in hist_titles]
-            hist_matrix = cbf_model.tfidf_matrix[hist_idxs]           # (n_hist, n_features) sparse
+            hist_matrix = cbf_model.tfidf_matrix[hist_idxs]
             hist_ratings = np.array([user_history[t] for t in hist_titles], dtype=float)
         else:
             hist_matrix, hist_ratings, hist_titles = None, None, []
@@ -616,7 +613,6 @@ def evaluate_content_based_system(cbf_model, data, test_size=0.2, random_state=4
             target_idx = cbf_model.title_to_idx[target_movie]
             target_vec = cbf_model.tfidf_matrix[target_idx]
             
-            # Exclude the target movie itself from its own history, if present
             if target_movie in hist_titles:
                 keep_mask = np.array([t != target_movie for t in hist_titles])
                 calc_matrix = hist_matrix[keep_mask]
@@ -626,8 +622,6 @@ def evaluate_content_based_system(cbf_model, data, test_size=0.2, random_state=4
                 calc_ratings = hist_ratings
                 
             if calc_matrix is not None and calc_matrix.shape[0] > 0:
-                # ONE batched similarity call against the user's whole history,
-                # instead of one linear_kernel call per history item.
                 sims = linear_kernel(target_vec, calc_matrix).flatten()
                 mask = sims > 0.05
                 if mask.any():
@@ -638,47 +632,83 @@ def evaluate_content_based_system(cbf_model, data, test_size=0.2, random_state=4
             
         cb_preds[i] = float(np.clip(predicted, 0.5, 5.0))
     
-    # Calculate Prediction Errors
+    # 1. Rating Prediction Errors (MSE, RMSE)
     mse_cb = mean_squared_error(actuals, cb_preds)
     rmse_cb = sqrt(mse_cb)
-    mae_cb = mean_absolute_error(actuals, cb_preds)
     
-    print("Evaluating Ranking Metrics (Precision, Recall, F1)...")
-    actual_binary = (actuals >= relevance_threshold).astype(int)
-    pred_binary = (cb_preds >= relevance_threshold).astype(int)
+    # 2. Top-K Catalog Ranking Metrics
+    print(f"Evaluating Top-{k} Ranking Metrics (Precision@{k}, Recall@{k}, F1@{k})...")
     
-    tp = ((pred_binary == 1) & (actual_binary == 1)).sum()
-    fp = ((pred_binary == 1) & (actual_binary == 0)).sum()
-    fn = ((pred_binary == 0) & (actual_binary == 1)).sum()
-    tn = ((pred_binary == 0) & (actual_binary == 0)).sum()
+    train_user_pos = train_df[train_df['rating'] >= relevance_threshold].groupby('userId')['title'].apply(list).to_dict()
+    train_user_seen = train_df.groupby('userId')['title'].apply(set).to_dict()
+    test_pos_by_user = test_df[test_df['rating'] >= relevance_threshold].groupby('userId')['title'].apply(list).to_dict()
     
-    prec_class = tp / (tp + fp) if (tp + fp) > 0 else 0
-    rec_class = tp / (tp + fn) if (tp + fn) > 0 else 0
-    f1_class = 2 * (prec_class * rec_class) / (prec_class + rec_class) if (prec_class + rec_class) > 0 else 0
-    acc_class = (tp + tn) / len(actual_binary) if len(actual_binary) > 0 else 0
+    all_catalog_titles = np.array(list(cbf_model.title_to_idx.keys()))
+    rng = np.random.RandomState(random_state)
+    
+    candidate_users = [u for u in test_pos_by_user if u in train_user_pos and len(test_pos_by_user[u]) > 0][:max_eval_users]
+    precisions_k, recalls_k, f1s_k = [], [], []
+    
+    for uid in candidate_users:
+        liked_train = [t for t in train_user_pos[uid] if t in cbf_model.title_to_idx]
+        if not liked_train:
+            continue
+            
+        liked_idxs = [cbf_model.title_to_idx[t] for t in liked_train]
+        user_profile_vec = np.asarray(cbf_model.tfidf_matrix[liked_idxs].mean(axis=0))
+        
+        pos_test = [t for t in test_pos_by_user[uid] if t in cbf_model.title_to_idx]
+        if not pos_test:
+            continue
+            
+        seen_movies = train_user_seen.get(uid, set())
+        unseen_pool = [t for t in all_catalog_titles if t not in seen_movies and t not in pos_test]
+        
+        neg_sample_size = min(num_negatives, len(unseen_pool))
+        neg_sample = rng.choice(unseen_pool, size=neg_sample_size, replace=False).tolist()
+        
+        candidate_pool = pos_test + neg_sample
+        cand_idxs = [cbf_model.title_to_idx[t] for t in candidate_pool]
+        cand_matrix = cbf_model.tfidf_matrix[cand_idxs]
+        
+        # Rank candidate movies by content similarity against user profile
+        sims = linear_kernel(user_profile_vec, cand_matrix).flatten()
+        top_k_indices = np.argsort(sims)[::-1][:k]
+        top_k_movies = [candidate_pool[i] for i in top_k_indices]
+        
+        pos_set = set(pos_test)
+        hits = sum(1 for m in top_k_movies if m in pos_set)
+        
+        p_k = hits / float(k)
+        r_k = hits / float(len(pos_set))
+        f_k = 2 * (p_k * r_k) / (p_k + r_k) if (p_k + r_k) > 0 else 0.0
+        
+        precisions_k.append(p_k)
+        recalls_k.append(r_k)
+        f1s_k.append(f_k)
+        
+    prec_class = float(np.mean(precisions_k)) if precisions_k else 0.0
+    rec_class = float(np.mean(recalls_k)) if recalls_k else 0.0
+    f1_class = float(np.mean(f1s_k)) if f1s_k else 0.0
     
     # Display formatted Evaluation Results
     print("\n--- Evaluation Results ---")
-    print(f"MSE:        {mse_cb:.4f}")
-    print(f"RMSE:       {rmse_cb:.4f}")
-    print(f"MAE:        {mae_cb:.4f}")
-    print(f"Precision:  {prec_class:.4f}")
-    print(f"Recall:     {rec_class:.4f}")
-    print(f"F1 Score:   {f1_class:.4f}")
+    print(f"MSE:          {mse_cb:.4f}")
+    print(f"RMSE:         {rmse_cb:.4f}")
+    print(f"Precision@{k}: {prec_class:.4f} ({prec_class*100:.2f}%)")
+    print(f"Recall@{k}:    {rec_class:.4f} ({rec_class*100:.2f}%)")
+    print(f"F1@{k}:        {f1_class:.4f} ({f1_class*100:.2f}%)")
     print("--------------------------\n")
     
     # Render neat Boxed Table with column dividers
     results_table = pd.DataFrame([
         {"Metric": "MSE (Mean Squared Error)", "Score": f"{mse_cb:.4f}"},
         {"Metric": "RMSE (Root Mean Squared Error)", "Score": f"{rmse_cb:.4f}"},
-        {"Metric": "MAE (Mean Absolute Error)", "Score": f"{mae_cb:.4f}"},
-        {"Metric": "Precision (Relevant Recommendations)", "Score": f"{prec_class:.4f} ({prec_class*100:.2f}%)"},
-        {"Metric": "Recall (Discovered User Favorites)", "Score": f"{rec_class:.4f} ({rec_class*100:.2f}%)"},
-        {"Metric": "F1-Score (Harmonic Mean)", "Score": f"{f1_class:.4f} ({f1_class*100:.2f}%)"},
-        {"Metric": "Classification Accuracy", "Score": f"{acc_class:.4f} ({acc_class*100:.2f}%)"},
-        {"Metric": "Item Cold-Start Resilience", "Score": "100% (No user ratings needed)"}
+        {"Metric": f"Precision@{k} (Top-{k} Precision)", "Score": f"{prec_class:.4f} ({prec_class*100:.2f}%)"},
+        {"Metric": f"Recall@{k} (Top-{k} Discovery Rate)", "Score": f"{rec_class:.4f} ({rec_class*100:.2f}%)"},
+        {"Metric": f"F1@{k} (Top-{k} Harmonic Mean)", "Score": f"{f1_class:.4f} ({f1_class*100:.2f}%)"}
     ])
-    print_ascii_table(results_table, max_col_widths={'Metric': 38, 'Score': 34})
+    print_ascii_table(results_table, max_col_widths={'Metric': 45, 'Score': 32})
 
 
 # ======================================================================================
@@ -894,7 +924,7 @@ def main():
         print("-"*50)
         print("[1] Search for a movie")
         print("[2] Get recommendations by movie")
-        print("[3] Run Recommender System Evaluation (RMSE/MSE/Precision/Recall/F1)")
+        print("[3] Run Recommender System Evaluation (MSE/RMSE/Precision@K/Recall@K/F1@K)")
         print("[0] Exit")
         print("-"*50)
         
