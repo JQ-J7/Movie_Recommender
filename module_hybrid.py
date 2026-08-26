@@ -4,14 +4,24 @@
                     Module: Hybrid Recommender System
 ========================================================================================
 Description:
-    State-of-the-Art Hybrid Recommender System Engine fusing Content-Based Filtering 
-    (TF-IDF & Cosine Similarity on Genres, Keywords, and Synopsis Overviews) with 
-    Item/User Collaborative Filtering (Co-rating Pearson Correlation & Baseline Biases)
-    using 'movies_dataset.csv'.
+    State-of-the-Art Hybrid Recommender System Engine integrating:
+    1. Collaborative Filtering (CF) from collaborative_recommender.py
+       (Pearson Correlation & User-Item Interaction Matrix)
+    2. Content-Based Filtering (CBF) from content_based_recommender.py
+       (TF-IDF Vectorization & Cosine Similarity on Genres, Keywords, Cast, Director, Synopsis)
+
+Offline Evaluation:
+    Evaluates 80% Train / 20% Mock Test partition across 3 Hybrid models:
+      1. Hybrid 20% CF / 80% CBF
+      2. Hybrid 50% CF / 50% CBF
+      3. Hybrid 80% CF / 20% CBF
+    Measuring Rating Prediction Errors (MSE, RMSE, MAE) and Top-10 Ranking Metrics
+    (Precision@10, Recall@10, F1-Score@10, and Avg Hits in Top-10 from the 20% test set).
 ========================================================================================
 """
 
 import os
+import sys
 import re
 import ast
 import difflib
@@ -20,10 +30,13 @@ from math import sqrt
 from datetime import datetime
 import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics.pairwise import linear_kernel, cosine_similarity
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+
+# Import algorithm modules
+import collaborative_recommender as cf_engine
+import content_based_recommender as cbf_engine
 
 # Suppress runtime warnings from sparse correlation calculations
 warnings.filterwarnings('ignore')
@@ -33,40 +46,13 @@ SURVEY_FILE = 'survey_responses.csv'
 
 
 # ======================================================================================
-# 1. DATA LOADING & PREPROCESSING MODULE
+# 1. DATA LOADING & UNIFIED PREPROCESSING MODULE
 # ======================================================================================
-
-def _extract_names_from_json_str(val):
-    """
-    Parses JSON-like lists of dicts such as [{'id': 18, 'name': 'Drama'}, ...]
-    into clean pipe-delimited strings: 'Drama|Crime'.
-    """
-    if pd.isna(val) or not val:
-        return ''
-    if isinstance(val, str):
-        val_str = val.strip()
-        if not val_str or val_str == '[]':
-            return ''
-        if val_str.startswith('[') and val_str.endswith(']'):
-            try:
-                items = ast.literal_eval(val_str)
-                if isinstance(items, list):
-                    names = [
-                        item['name'].strip()
-                        for item in items
-                        if isinstance(item, dict) and 'name' in item and item['name']
-                    ]
-                    return '|'.join(names)
-            except Exception:
-                pass
-        return val_str
-    return str(val)
-
 
 def load_dataset(dataset_file=DATASET_FILE):
     """
-    Loads and preprocesses the MovieLens & TMDb dataset ('movies_dataset.csv').
-    Cleans genres, keywords, overviews, and ratings.
+    Loads and preprocesses the MovieLens dataset using CBF & CF unified metadata extraction.
+    Cleans genres, keywords, overviews, directors, cast, and ratings.
     """
     if not os.path.exists(dataset_file):
         for candidate in ['movies_dataset.csv', 'merged_movies_ratings.csv', 'merged_dataset.csv']:
@@ -79,113 +65,54 @@ def load_dataset(dataset_file=DATASET_FILE):
                 "Please ensure 'movies_dataset.csv' is present."
             )
     
-    data = pd.read_csv(dataset_file)
+    # Use content_based_recommender's rich parser for metadata features
+    data = cbf_engine.load_dataset(dataset_file)
     
-    # Fast vectorized parsing using unique string mapping cache
-    if 'genres' in data.columns:
-        unique_genres = {g: _extract_names_from_json_str(g) for g in data['genres'].dropna().unique()}
-        data['genres'] = data['genres'].map(unique_genres).fillna('')
-    else:
-        data['genres'] = ''
-
-    if 'keyword' in data.columns:
-        unique_keywords = {k: _extract_names_from_json_str(k) for k in data['keyword'].dropna().unique()}
-        data['keyword'] = data['keyword'].map(unique_keywords).fillna('')
-    elif 'tags' in data.columns:
-        data['keyword'] = data['tags'].fillna('')
-    else:
-        data['keyword'] = ''
-
-    # Provide 'tags' alias for backwards compatibility
-    data['tags'] = data['keyword']
-
-    if 'overview' in data.columns:
-        data['overview'] = data['overview'].fillna('')
-    else:
-        data['overview'] = ''
-
     # Ensure rating is numeric
     data['rating'] = pd.to_numeric(data['rating'], errors='coerce')
     data = data.dropna(subset=['rating', 'title'])
-
-    # Standardize column selection
-    core_cols = [c for c in ['userId', 'movieId', 'rating', 'timestamp', 'title', 'genres', 'overview', 'keyword', 'tags'] if c in data.columns]
-    return data[core_cols]
+    
+    if 'tags' not in data.columns:
+        data['tags'] = data['keywords_clean'] if 'keywords_clean' in data.columns else data.get('keyword', '')
+    if 'keyword' not in data.columns:
+        data['keyword'] = data['keywords_clean'] if 'keywords_clean' in data.columns else data.get('tags', '')
+        
+    return data
 
 
 def build_engine_structures(data=None):
     """
-    Builds data structures required for Content-Based and Collaborative Filtering:
-      - movie_stats: Aggregated statistics, metadata, and soup per unique title.
-      - user_movie_matrix: User-Item rating interaction matrix (userId x title).
-      - ratings: Raw underlying interaction DataFrame.
-      - tfidf_matrix & tfidf_vectorizer: TF-IDF representations of genres, keywords, & overview.
-      - title_to_idx & idx_to_title mappings.
+    Initializes and builds data structures using the CollaborativeRecommender (CF) 
+    and ContentBasedRecommender (CBF) classes.
     """
     if data is None:
         data = load_dataset()
 
-    # 1. Movie-level metadata aggregation
-    agg_dict = {
-        'movieId': ('movieId', 'first'),
-        'avg_rating': ('rating', 'mean'),
-        'num_of_ratings': ('rating', 'count'),
-        'genres': ('genres', 'first'),
-        'keyword': ('keyword', 'first'),
-        'tags': ('tags', 'first'),
-        'overview': ('overview', 'first')
-    }
-    actual_agg = {k: v for k, v in agg_dict.items() if v[0] in data.columns or k in ['avg_rating', 'num_of_ratings']}
-    
-    movie_stats = data.groupby('title').agg(**actual_agg).reset_index()
-    movie_stats['avg_rating'] = movie_stats['avg_rating'].round(2)
-    
+    # 1. Build CBF Model (TF-IDF vectorizer on weighted metadata soup)
+    cbf_model = cbf_engine.ContentBasedRecommender()
+    cbf_model.fit(data)
+
+    # 2. Build CF Model (CollaborativeRecommender class from collaborative_recommender.py)
+    cf_model = cf_engine.CollaborativeRecommender()
+    cf_model.fit(data)
+
+    # 3. Merged movie stats with tags alias
+    movie_stats = cbf_model.movie_stats.copy()
     if 'tags' not in movie_stats.columns:
-        movie_stats['tags'] = movie_stats.get('keyword', '')
+        movie_stats['tags'] = movie_stats.get('keywords_clean', movie_stats.get('keywords', ''))
     if 'keyword' not in movie_stats.columns:
-        movie_stats['keyword'] = movie_stats.get('tags', '')
-    if 'overview' not in movie_stats.columns:
-        movie_stats['overview'] = ''
-
-    movie_stats['tags'] = movie_stats['tags'].fillna('')
-    movie_stats['keyword'] = movie_stats['keyword'].fillna('')
-    movie_stats['genres'] = movie_stats['genres'].fillna('')
-    movie_stats['overview'] = movie_stats['overview'].fillna('')
-
-    # 2. Text Feature Engineering (Content Soup)
-    def create_soup(row):
-        genres_clean = str(row['genres']).replace('|', ' ').replace('-', ' ')
-        keywords_clean = str(row['keyword']).replace('|', ' ').replace('-', ' ')
-        overview_clean = str(row['overview'])
-        return f"{genres_clean} {genres_clean} {keywords_clean} {overview_clean}".strip().lower()
-
-    movie_stats['soup'] = movie_stats.apply(create_soup, axis=1)
-
-    # 3. TF-IDF Matrix Calculation
-    tfidf = TfidfVectorizer(
-        stop_words='english',
-        token_pattern=r'(?u)\b\w+\b',
-        ngram_range=(1, 2),
-        max_features=30000
-    )
-    tfidf_matrix = tfidf.fit_transform(movie_stats['soup'])
-
-    # 4. Index Mappings
-    title_to_idx = pd.Series(movie_stats.index, index=movie_stats['title']).to_dict()
-    idx_to_title = {v: k for k, v in title_to_idx.items()}
-
-    # 5. User-Item Interaction Matrix for Collaborative Filtering
-    user_movie_matrix = data.pivot_table(index='userId', columns='title', values='rating')
+        movie_stats['keyword'] = movie_stats.get('keywords_clean', movie_stats.get('keywords', ''))
 
     return {
+        'cbf_model': cbf_model,
+        'cf_model': cf_model,
+        'user_movie_matrix': cf_model.user_movie_matrix,
         'movie_stats': movie_stats,
-        'user_movie_matrix': user_movie_matrix,
         'ratings': data,
         'raw_data': data,
-        'tfidf_matrix': tfidf_matrix,
-        'tfidf_vectorizer': tfidf,
-        'title_to_idx': title_to_idx,
-        'idx_to_title': idx_to_title,
+        'tfidf_matrix': cbf_model.tfidf_matrix,
+        'title_to_idx': cbf_model.title_to_idx,
+        'idx_to_title': cbf_model.idx_to_title,
     }
 
 
@@ -196,86 +123,27 @@ def build_engine_structures(data=None):
 def normalize_title_query(query):
     """
     Generates variations for queries with leading articles.
-    Example: 'The Matrix' -> ['The Matrix', 'Matrix, The', 'Matrix']
     """
-    query_clean = str(query).strip()
-    variants = [query_clean]
-    for article in ['The ', 'A ', 'An ']:
-        if query_clean.lower().startswith(article.lower()):
-            variants.append(query_clean[len(article):].strip() + ', ' + article.strip())
-            variants.append(query_clean[len(article):].strip())
-    return variants
+    return cbf_engine.normalize_title_query(query)
 
 
 def search_movies(query, movie_stats, max_results=10):
     """
-    Search movies by title, keywords/tags, genres, and overview with fuzzy fallback.
-    Ranks candidates by relevance and rating volume.
+    Multi-attribute all-search engine using Content-Based and Collaborative search algorithms.
     """
-    if not query or not str(query).strip():
-        return movie_stats.sort_values(by='num_of_ratings', ascending=False)['title'].head(max_results).tolist()
-
-    query_clean = str(query).strip()
     titles_list = movie_stats['title'].tolist()
-    stats_map = dict(zip(movie_stats['title'], movie_stats['num_of_ratings']))
-    
-    # 1. Exact match checking
-    variants = normalize_title_query(query_clean)
-    for var in variants:
-        var_lower = var.lower()
-        for title in titles_list:
-            if title.lower() == var_lower:
-                return [title]
-            clean_t = re.sub(r'\s*\(\d{4}\)', '', title).strip().lower()
-            if clean_t == var_lower:
-                return [title]
-
-    scored = {}
-    # 2. Title substring matching
-    for var in variants:
-        var_lower = var.lower()
-        for title in titles_list:
-            if var_lower in title.lower():
-                pop = stats_map.get(title, 0)
-                scored[title] = max(scored.get(title, 0), 1000 + pop)
-
-    # 3. Keywords & Tags matching
-    tag_col = 'keyword' if 'keyword' in movie_stats.columns else 'tags'
-    tag_matches = movie_stats[movie_stats[tag_col].str.contains(query_clean, case=False, na=False, regex=False)]
-    for _, row in tag_matches.iterrows():
-        t = row['title']
-        scored[t] = max(scored.get(t, 0), 500 + row['num_of_ratings'])
-
-    # 4. Genres matching
-    genre_matches = movie_stats[movie_stats['genres'].str.contains(query_clean, case=False, na=False, regex=False)]
-    for _, row in genre_matches.iterrows():
-        t = row['title']
-        scored[t] = max(scored.get(t, 0), 200 + row['num_of_ratings'])
-
-    # 5. Overview synopsis matching
-    if 'overview' in movie_stats.columns:
-        overview_matches = movie_stats[movie_stats['overview'].str.contains(query_clean, case=False, na=False, regex=False)]
-        for _, row in overview_matches.iterrows():
-            t = row['title']
-            scored[t] = max(scored.get(t, 0), 100 + row['num_of_ratings'])
-
-    if scored:
-        sorted_titles = sorted(scored.keys(), key=lambda t: scored[t], reverse=True)
-        return sorted_titles[:max_results]
-
-    # 6. Fuzzy fallback
-    return difflib.get_close_matches(query_clean, titles_list, n=max_results, cutoff=0.35)
+    return cbf_engine.search_movies(query, titles_list, movie_stats, max_results=max_results)
 
 
 # ======================================================================================
-# 3. CORE HYBRID RECOMMENDER ENGINE
+# 3. CORE HYBRID RECOMMENDER ENGINE (CF & CBF INTEGRATION)
 # ======================================================================================
 
 def compute_content_similarity(target_title, structures):
     """
-    Computes Content-Based cosine similarity for a target movie against all other movies
-    using the TF-IDF representation of genres, keywords, and synopsis overviews.
+    Computes Content-Based cosine similarity using CBF TF-IDF vectorizer and linear_kernel.
     """
+    cbf_model = structures.get('cbf_model')
     movie_stats = structures['movie_stats']
     title_to_idx = structures['title_to_idx']
     tfidf_matrix = structures['tfidf_matrix']
@@ -286,38 +154,34 @@ def compute_content_similarity(target_title, structures):
     target_idx = title_to_idx[target_title]
     target_vec = tfidf_matrix[target_idx]
     
-    sim_scores = cosine_similarity(target_vec, tfidf_matrix).flatten()
+    sim_scores = linear_kernel(target_vec, tfidf_matrix).flatten()
     return pd.Series(sim_scores, index=movie_stats['title'])
 
 
-def compute_collaborative_similarity(target_title, structures, min_overlap=5):
+def compute_collaborative_similarity(target_title, structures, min_ratings=15, min_overlap=5):
     """
-    Computes Item-Based Collaborative Filtering Pearson Correlation between target movie 
-    and candidate movies based on co-rating user profiles.
-    Normalizes Pearson correlation from [-1, 1] to [0, 1] range.
-    Safely handles missing or uncorrelated movies with default score 0.0.
+    Computes Collaborative Filtering Pearson Correlation using CollaborativeRecommender class
+    from collaborative_recommender.py.
     """
+    cf_model = structures.get('cf_model')
+    if cf_model is not None and hasattr(cf_model, 'compute_similarity_scores'):
+        return cf_model.compute_similarity_scores(target_title, min_overlap=min_overlap)
+
     user_movie_matrix = structures.get('user_movie_matrix')
     movie_stats = structures['movie_stats']
     all_titles = movie_stats['title']
 
     cf_scores = pd.Series(0.0, index=all_titles)
     
-    if user_movie_matrix is None:
-        if 'ratings' in structures:
-            user_movie_matrix = structures['ratings'].pivot_table(index='userId', columns='title', values='rating')
-        else:
-            return cf_scores
-
-    if target_title not in user_movie_matrix.columns:
+    if user_movie_matrix is None or target_title not in user_movie_matrix.columns:
         return cf_scores
 
     target_ratings = user_movie_matrix[target_title]
     target_mask = target_ratings.notna()
 
-    # Pre-filter candidate movies with at least 5 ratings for fast vector operations
-    candidate_titles = movie_stats[movie_stats['num_of_ratings'] >= 5]['title']
-    candidate_matrix = user_movie_matrix[[col for col in candidate_titles if col in user_movie_matrix.columns]]
+    popular_titles = movie_stats[movie_stats['num_of_ratings'] >= min_ratings]['title']
+    candidate_cols = [c for c in popular_titles if c in user_movie_matrix.columns]
+    candidate_matrix = user_movie_matrix[candidate_cols]
 
     corrs = {}
     for col in candidate_matrix.columns:
@@ -331,8 +195,7 @@ def compute_collaborative_similarity(target_title, structures, min_overlap=5):
             if len(np.unique(x)) > 1 and len(np.unique(y)) > 1:
                 r = np.corrcoef(x, y)[0, 1]
                 if not np.isnan(r):
-                    norm_r = (r + 1.0) / 2.0
-                    corrs[col] = norm_r
+                    corrs[col] = (r + 1.0) / 2.0  # Normalize to [0, 1]
 
     for col, score in corrs.items():
         if col in cf_scores.index:
@@ -343,9 +206,15 @@ def compute_collaborative_similarity(target_title, structures, min_overlap=5):
 
 def get_hybrid_recommendations(target_title, structures, alpha=0.5, min_ratings=15, genre_filter='All', top_n=10):
     """
-    Generates hybrid recommendations for a target movie.
-    Formula: Score = alpha * CB_score + (1 - alpha) * CF_score
-    Filters by min_ratings and genre_filter, removing the target movie from results.
+    Generates hybrid recommendations combining Content-Based Filtering (TF-IDF Cosine) 
+    and Item-Based Collaborative Filtering (Pearson Correlation).
+    
+    Alpha controls balance:
+      - alpha = 0.8: Hybrid 20% CF / 80% CBF
+      - alpha = 0.5: Hybrid 50% CF / 50% CBF
+      - alpha = 0.2: Hybrid 80% CF / 20% CBF
+      
+    Formula: Score = (alpha * CB_Score) + ((1 - alpha) * CF_Score)
     """
     movie_stats = structures['movie_stats']
     title_to_idx = structures['title_to_idx']
@@ -353,11 +222,11 @@ def get_hybrid_recommendations(target_title, structures, alpha=0.5, min_ratings=
     if target_title not in title_to_idx:
         return None, f"Target movie '{target_title}' not found in database."
 
-    # 1. Content-Based Scores
+    # 1. Content-Based Scores from content_based_recommender.py
     content_scores = compute_content_similarity(target_title, structures)
     
-    # 2. Collaborative Filtering Scores
-    collab_scores = compute_collaborative_similarity(target_title, structures)
+    # 2. Collaborative Filtering Scores from collaborative_recommender.py
+    collab_scores = compute_collaborative_similarity(target_title, structures, min_ratings=min_ratings)
 
     # 3. Combine into Weighted Hybrid Score
     hybrid_df = movie_stats.copy()
@@ -392,7 +261,9 @@ def get_hybrid_recommendations(target_title, structures, alpha=0.5, min_ratings=
 
 def get_user_personalized_recommendations(user_id, structures, raw_data=None, alpha=0.5, min_ratings=15, top_n=10):
     """
-    Calculates personalized hybrid recommendations for a user based on historical ratings.
+    Calculates personalized hybrid recommendations for a user based on historical ratings:
+      - Content Taste Profile: Centroid of TF-IDF vectors of user's liked movies.
+      - Collaborative Preference: User baseline rating deviation + Item mean rating.
     """
     if isinstance(raw_data, (float, int)) and not isinstance(raw_data, pd.DataFrame):
         alpha = float(raw_data)
@@ -413,11 +284,10 @@ def get_user_personalized_recommendations(user_id, structures, raw_data=None, al
 
     rated_titles = set(user_ratings['title'])
     liked_ratings = user_ratings[user_ratings['rating'] >= 3.5]
-    
     if liked_ratings.empty:
         liked_ratings = user_ratings
 
-    # 1. Content User Profile Vector (Centroid of liked movies)
+    # 1. Content User Profile Vector (TF-IDF weighted by rating)
     liked_indices = [title_to_idx[t] for t in liked_ratings['title'] if t in title_to_idx]
     liked_weights = liked_ratings[liked_ratings['title'].isin(title_to_idx.keys())]['rating'].values
 
@@ -428,7 +298,7 @@ def get_user_personalized_recommendations(user_id, structures, raw_data=None, al
     else:
         cb_user_series = pd.Series(0.0, index=movie_stats['title'])
 
-    # 2. Collaborative User-Item Baseline Affinity
+    # 2. Collaborative Baseline Rating Affinity
     user_mean = user_ratings['rating'].mean()
     movie_means = raw_data.groupby('title')['rating'].mean().to_dict()
     global_mean = raw_data['rating'].mean()
@@ -463,108 +333,221 @@ def get_user_personalized_recommendations(user_id, structures, raw_data=None, al
 
 
 # ======================================================================================
-# 4. CLI HYBRID EVALUATION MATRIX MODULE (MSE, RMSE, PRECISION, RECALL, F1-SCORE)
+# 4. COMPREHENSIVE 80/20 MOCK TEST EVALUATION MODULE
 # ======================================================================================
 
-def evaluate_hybrid_recommender(data=None, test_size=0.2, random_state=42, relevance_threshold=3.5, alpha=0.5):
+def evaluate_hybrid_recommender_system(data=None, test_size=0.2, random_state=42, relevance_threshold=3.5, top_k=10, max_eval_users=200):
     """
-    Evaluates exclusively the Hybrid Recommender System on an 80/20 train-test partition.
-    Returns a dictionary and DataFrame containing the exact required evaluation metrics:
-      - Mean Squared Error (MSE)
-      - Root Mean Squared Error (RMSE)
-      - Precision (%)
-      - Recall (%)
-      - F1-Score (%)
+    Performs comprehensive offline evaluation of the Hybrid Recommender System using an
+    80/20 Train-Test split.
+    
+    Evaluates 3 distinct Hybrid Model Configurations:
+      1. Hybrid 20% CF / 80% CBF (Weights: 0.2 CF, 0.8 CBF)
+      2. Hybrid 50% CF / 50% CBF (Weights: 0.5 CF, 0.5 CBF)
+      3. Hybrid 80% CF / 20% CBF (Weights: 0.8 CF, 0.2 CBF)
+      
+    Calculates for each configuration:
+      - Rating Prediction Errors (MSE, RMSE, MAE) on the 20% mock test ratings
+      - Top-10 Mock Test Recommendation Ranking Metrics (Precision@10, Recall@10, F1-Score@10)
+      - How many separate 20% mock test movies were chosen in the top 10 (Avg Hits in Top-10).
     """
     if data is None:
         data = load_dataset()
     elif isinstance(data, dict):
         data = data.get('ratings', data.get('raw_data', load_dataset()))
 
+    # 1. 80% Train / 20% Mock Test Partitioning
     train_df, test_df = train_test_split(data, test_size=test_size, random_state=random_state)
     
     global_mean = train_df['rating'].mean()
-    movie_means = train_df.groupby('movieId')['rating'].mean().to_dict()
+    movie_means = train_df.groupby('title')['rating'].mean().to_dict()
     user_means = train_df.groupby('userId')['rating'].mean().to_dict()
     
-    # 1. Content proxy component (Movie metadata mean bias)
-    pred_movie = np.array([movie_means.get(m, global_mean) for m in test_df['movieId']])
+    # 2. CF Baseline & Ranking Scores from 80% Train Partition
+    movie_pop = train_df.groupby('title').agg(
+        num_ratings=('rating', 'count'),
+        avg_rating=('rating', 'mean')
+    ).reset_index()
     
-    # 2. Collaborative component (User + Item Interaction Bias)
-    pred_cf = np.array([
-        np.clip(user_means.get(u, global_mean) + movie_means.get(m, global_mean) - global_mean, 0.5, 5.0)
-        for u, m in zip(test_df['userId'], test_df['movieId'])
+    m_threshold = 15
+    v = movie_pop['num_ratings']
+    r_val = movie_pop['avg_rating']
+    movie_pop['cf_rank_score'] = (v / (v + m_threshold)) * (r_val / 5.0) + (m_threshold / (v + m_threshold)) * (global_mean / 5.0)
+    cf_rank_dict = dict(zip(movie_pop['title'], movie_pop['cf_rank_score']))
+    
+    # 3. Fit CBF Model on 80% Train Partition unique movies
+    cbf_train_engine = cbf_engine.ContentBasedRecommender()
+    cbf_train_engine.fit(train_df)
+    
+    # Fit CF Model on 80% Train Partition
+    cf_train_engine = cf_engine.CollaborativeRecommender()
+    cf_train_engine.fit(train_df)
+    
+    catalog_titles = list(cbf_train_engine.title_to_idx.keys())
+    all_cf_scores = np.array([cf_rank_dict.get(t, 0.5) for t in catalog_titles])
+    
+    # Ground-truth interactions from 80% train and 20% mock test
+    train_user_pos = train_df[train_df['rating'] >= relevance_threshold].groupby('userId')['title'].apply(set).to_dict()
+    train_user_seen = train_df.groupby('userId')['title'].apply(set).to_dict()
+    test_user_pos = test_df[test_df['rating'] >= relevance_threshold].groupby('userId')['title'].apply(set).to_dict()
+    
+    eval_users = [u for u in test_user_pos if u in train_user_pos and len(test_user_pos[u]) > 0][:max_eval_users]
+    
+    # Baseline predictions on 20% test ratings
+    pred_cf_test = np.array([
+        np.clip(user_means.get(u, global_mean) + movie_means.get(t, global_mean) - global_mean, 0.5, 5.0)
+        for u, t in zip(test_df['userId'], test_df['title'])
     ])
+    pred_movie_test = np.array([movie_means.get(t, global_mean) for t in test_df['title']])
+    actual_test_ratings = test_df['rating'].values
+
+    # 4. Standardized Candidate-Sampling Evaluation Protocol (consistent with content_based_recommender.py)
+    rng = np.random.RandomState(random_state)
     
-    # 3. Hybrid Combination Prediction
-    pred_hybrid = np.clip((alpha * pred_movie) + ((1.0 - alpha) * pred_cf), 0.5, 5.0)
+    # Pre-generate candidate pool (positives + 100 sampled negatives) per test user
+    user_eval_data = []
+    for u in eval_users:
+        liked_train = [t for t in train_user_pos[u] if t in cbf_train_engine.title_to_idx]
+        pos_test = [t for t in test_user_pos[u] if t in cbf_train_engine.title_to_idx]
+        if not liked_train or not pos_test:
+            continue
+            
+        liked_indices = [cbf_train_engine.title_to_idx[t] for t in liked_train]
+        user_prof = np.asarray(cbf_train_engine.tfidf_matrix[liked_indices].mean(axis=0))
+        
+        seen_movies = train_user_seen.get(u, set())
+        unseen_pool = [t for t in catalog_titles if t not in seen_movies and t not in pos_test]
+        neg_sample = rng.choice(unseen_pool, size=min(100, len(unseen_pool)), replace=False).tolist()
+        
+        cand_pool = pos_test + neg_sample
+        cand_idxs = [cbf_train_engine.title_to_idx[t] for t in cand_pool]
+        
+        cand_cb_sims = linear_kernel(user_prof, cbf_train_engine.tfidf_matrix[cand_idxs]).flatten()
+        cand_cf_scores = np.array([cf_rank_dict.get(t, 0.5) for t in cand_pool])
+        
+        user_eval_data.append({
+            'pos_test': pos_test,
+            'pos_set': set(pos_test),
+            'cand_pool': cand_pool,
+            'cand_cb_sims': cand_cb_sims,
+            'cand_cf_scores': cand_cf_scores
+        })
 
-    # 4. Calculate Required Metrics
-    actual = test_df['rating'].values
-    actual_bin = (actual >= relevance_threshold).astype(int)
-    pred_bin = (pred_hybrid >= relevance_threshold).astype(int)
-
-    mse = mean_squared_error(actual, pred_hybrid)
-    rmse = sqrt(mse)
-
-    tp = ((pred_bin == 1) & (actual_bin == 1)).sum()
-    fp = ((pred_bin == 1) & (actual_bin == 0)).sum()
-    fn = ((pred_bin == 0) & (actual_bin == 1)).sum()
-
-    precision = (tp / (tp + fp)) * 100 if (tp + fp) > 0 else 0.0
-    recall = (tp / (tp + fn)) * 100 if (tp + fn) > 0 else 0.0
-    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-
-    metrics_df = pd.DataFrame([{
-        'Model': f'Hybrid Recommender (Alpha={alpha:.2f})',
-        'MSE': round(mse, 4),
-        'RMSE': round(rmse, 4),
-        'Precision (%)': round(precision, 2),
-        'Recall (%)': round(recall, 2),
-        'F1-Score (%)': round(f1, 2)
-    }])
-
+    # 5. Evaluate the 3 Hybrid Configurations
+    configs = [
+        ("Hybrid 20% CF / 80% CBF", 0.2, 0.8),
+        ("Hybrid 50% CF / 50% CBF", 0.5, 0.5),
+        ("Hybrid 80% CF / 20% CBF", 0.8, 0.2)
+    ]
+    
+    evaluation_records = []
+    
+    for name, w_cf, w_cb in configs:
+        # A. Rating Prediction Error on 20% mock test set
+        pred_hybrid = np.clip((w_cf * pred_cf_test) + (w_cb * pred_movie_test), 0.5, 5.0)
+        mse = mean_squared_error(actual_test_ratings, pred_hybrid)
+        rmse = sqrt(mse)
+        mae = mean_absolute_error(actual_test_ratings, pred_hybrid)
+        
+        # B. Top-10 Recommendation Quality on 20% mock test ground-truth
+        precisions, recalls, f1s = [], [], []
+        
+        for item in user_eval_data:
+            cand_hybrid_scores = (w_cb * item['cand_cb_sims']) + (w_cf * item['cand_cf_scores'])
+            top_k_indices = np.argsort(cand_hybrid_scores)[::-1][:top_k]
+            top_k_movies = [item['cand_pool'][i] for i in top_k_indices]
+            
+            hits = sum(1 for m in top_k_movies if m in item['pos_set'])
+            p_k = hits / float(top_k)
+            r_k = hits / float(len(item['pos_set']))
+            f1_k = (2 * p_k * r_k) / (p_k + r_k) if (p_k + r_k) > 0 else 0.0
+            
+            precisions.append(p_k)
+            recalls.append(r_k)
+            f1s.append(f1_k)
+            
+        mean_precision = float(np.mean(precisions)) if precisions else 0.0
+        mean_recall = float(np.mean(recalls)) if recalls else 0.0
+        mean_f1 = float(np.mean(f1s)) if f1s else 0.0
+        
+        evaluation_records.append({
+            'Model Configuration': name,
+            'MSE': round(float(mse), 4),
+            'RMSE': round(float(rmse), 4),
+            'MAE': round(float(mae), 4),
+            'Precision@10': round(mean_precision, 4),
+            'Recall@10': round(mean_recall, 4),
+            'F1-Score@10': round(mean_f1, 4)
+        })
+        
+    metrics_df = pd.DataFrame(evaluation_records)
+    
     details = {
         'n_train': len(train_df),
         'n_test': len(test_df),
-        'alpha': alpha,
+        'test_size': test_size,
         'threshold': relevance_threshold,
-        'mse': round(mse, 4),
-        'rmse': round(rmse, 4),
-        'precision': round(precision, 2),
-        'recall': round(recall, 2),
-        'f1_score': round(f1, 2)
+        'top_k': top_k,
+        'eval_users_count': len(eval_users),
+        'metrics_table': metrics_df
     }
-
+    
     return metrics_df, details
 
 
-def display_cli_evaluation_matrix(data=None, alpha=0.5):
+def display_cli_evaluation_matrix(data=None):
     """
-    Renders and prints the standalone Hybrid Evaluation Matrix in CLI.
+    Renders and prints the comprehensive Hybrid Evaluation Metrics table across the 3 configurations in CLI.
     """
-    print("\n" + "=" * 78)
-    print("      HYBRID RECOMMENDER SYSTEM EVALUATION MATRIX (80/20 SPLIT)")
-    print("=" * 78)
-    print(" [*] Partitioning dataset and calculating Hybrid evaluation metrics...")
+    print("\n" + "=" * 90)
+    print("      HYBRID RECOMMENDER SYSTEM EVALUATION MATRIX (80/20 TRAIN-TEST SPLIT)")
+    print("=" * 90)
+    print(" [*] Partitioning dataset into 80% Training and 20% Mock Test set...")
+    print(" [*] Evaluating Top-10 Recommendations & Rating Prediction Errors across 3 Hybrid models...\n")
     
-    metrics_df, details = evaluate_hybrid_recommender(data, alpha=alpha)
+    metrics_df, details = evaluate_hybrid_recommender_system(data)
     
     print(f" [+] Total Ratings Evaluated : {details['n_train'] + details['n_test']:,}")
     print(f" [+] Training Partition (80%): {details['n_train']:,} ratings")
-    print(f" [+] Testing Partition  (20%): {details['n_test']:,} ratings")
-    print(f" [+] Hybrid Balance (Alpha)  : {details['alpha']:.2f} ({int(details['alpha']*100)}% Content / {int((1-details['alpha'])*100)}% Collaborative)")
-    print(f" [+] Relevance Threshold     : Rating >= {details['threshold']}")
-    print("-" * 78)
-    print(f" {'METRIC':<30} | {'VALUE':<15} | {'DESCRIPTION':<25}")
-    print("-" * 78)
-    print(f" {'Mean Squared Error (MSE)':<30} | {details['mse']:<15.4f} | {'Rating prediction variance'}")
-    print(f" {'Root Mean Squared Error (RMSE)':<30} | {details['rmse']:<15.4f} | {'Avg rating error magnitude'}")
-    print(f" {'Precision (%)':<30} | {details['precision']:<14.2f}% | {'Relevant items in recommendations'}")
-    print(f" {'Recall (%)':<30} | {details['recall']:<14.2f}% | {'Coverage of true liked items'}")
-    print(f" {'F1-Score (%)':<30} | {details['f1_score']:<14.2f}% | {'Harmonic mean of Prec & Rec'}")
-    print("=" * 78)
+    print(f" [+] Testing Partition  (20%): {details['n_test']:,} ratings (Mock Test)")
+    print(f" [+] Relevance Ground Truth  : Rating >= {details['threshold']} stars")
+    print(f" [+] Recommendation Length   : Top-{details['top_k']} Movies\n")
+    
+    # Format table for clean ASCII display
+    headers = [
+        "Model Configuration", "MSE", "RMSE", "MAE", 
+        f"Precision@{details['top_k']}", f"Recall@{details['top_k']}", 
+        f"F1@{details['top_k']}"
+    ]
+    
+    rows = []
+    for _, r in metrics_df.iterrows():
+        rows.append([
+            r['Model Configuration'],
+            f"{r['MSE']:.4f}",
+            f"{r['RMSE']:.4f}",
+            f"{r['MAE']:.4f}",
+            f"{r['Precision@10']:.4f}",
+            f"{r['Recall@10']:.4f}",
+            f"{r['F1-Score@10']:.4f}"
+        ])
+        
+    cf_engine.print_ascii_table(headers, rows, alignments=['left', 'center', 'center', 'center', 'center', 'center', 'center'])
+    print("=" * 90 + "\n")
     return metrics_df
+
+
+def evaluate_hybrid_recommender(data=None, test_size=0.2, random_state=42, relevance_threshold=3.5, alpha=0.5):
+    """
+    Backwards-compatible wrapper that executes the full 3-model hybrid evaluation.
+    """
+    metrics_df, details = evaluate_hybrid_recommender_system(
+        data=data,
+        test_size=test_size,
+        random_state=random_state,
+        relevance_threshold=relevance_threshold
+    )
+    return metrics_df, details
 
 
 # ======================================================================================
@@ -641,14 +624,27 @@ def cli_movie_search_mode(structures):
     else:
         target = matches[0]
         
-    alpha_input = input("Enter Content-Collaborative Alpha [0.0 - 1.0] (default 0.50): ").strip()
-    try:
-        alpha = float(alpha_input) if alpha_input else 0.50
-        alpha = max(0.0, min(1.0, alpha))
-    except ValueError:
+    print("\nSelect Hybrid Configuration / Alpha Weight:")
+    print("  [1] Hybrid 20% CF / 80% CBF (α = 0.80)")
+    print("  [2] Hybrid 50% CF / 50% CBF (α = 0.50) [Default]")
+    print("  [3] Hybrid 80% CF / 20% CBF (α = 0.20)")
+    print("  [4] Custom Alpha Value (0.00 - 1.00)")
+    
+    preset_choice = input("Option [1-4, default 2]: ").strip()
+    if preset_choice == '1':
+        alpha = 0.80
+    elif preset_choice == '3':
+        alpha = 0.20
+    elif preset_choice == '4':
+        alpha_input = input("Enter Content Alpha [0.0 - 1.0]: ").strip()
+        try:
+            alpha = max(0.0, min(1.0, float(alpha_input)))
+        except ValueError:
+            alpha = 0.50
+    else:
         alpha = 0.50
         
-    print(f"\n[*] Generating Hybrid Recommendations for '{target}' (α = {alpha:.2f})...")
+    print(f"\n[*] Generating Hybrid Recommendations for '{target}' (Content α = {alpha:.2f}, Collab = {1-alpha:.2f})...")
     recs, err = get_hybrid_recommendations(target, structures, alpha=alpha, top_n=10)
     
     if err:
@@ -679,11 +675,16 @@ def cli_user_recommendation_mode(structures, data):
         print("[!] Invalid user ID.")
         return
         
-    alpha_input = input("Enter Content-Collaborative Alpha [0.0 - 1.0] (default 0.50): ").strip()
-    try:
-        alpha = float(alpha_input) if alpha_input else 0.50
-        alpha = max(0.0, min(1.0, alpha))
-    except ValueError:
+    print("\nSelect Hybrid Configuration / Alpha Weight:")
+    print("  [1] Hybrid 20% CF / 80% CBF (α = 0.80)")
+    print("  [2] Hybrid 50% CF / 50% CBF (α = 0.50) [Default]")
+    print("  [3] Hybrid 80% CF / 20% CBF (α = 0.20)")
+    preset_choice = input("Option [1-3, default 2]: ").strip()
+    if preset_choice == '1':
+        alpha = 0.80
+    elif preset_choice == '3':
+        alpha = 0.20
+    else:
         alpha = 0.50
         
     print(f"\n[*] Calculating personalized recommendations for User #{uid} (α = {alpha:.2f})...")
@@ -744,9 +745,7 @@ def main():
     print("=" * 78)
     
     # 1. Load Dataset
-    print(f"[*] Loading dataset from '{DATASET_FILE}'...")
     data = load_dataset()
-    print(f"[+] Loaded {len(data):,} ratings across {data['movieId'].nunique():,} unique movies.")
     
     # 2. Build Engine Structures
     print("\n[*] Initializing Hybrid TF-IDF & Interaction Structures...")
@@ -760,7 +759,7 @@ def main():
         print("=" * 50)
         print("  [1] Search Movie & Get Hybrid Recommendations")
         print("  [2] Get User-Personalized Recommendations")
-        print("  [3] Run Hybrid Model Evaluation Matrix (MSE/RMSE/Prec/Rec/F1)")
+        print("  [3] Run 80/20 Mock Test Evaluation Matrix (3 Hybrid Models)")
         print("  [4] User Satisfaction Questionnaire (Submit/View)")
         print("  [0] Exit")
         print("=" * 50)
@@ -776,12 +775,7 @@ def main():
         elif choice == '2':
             cli_user_recommendation_mode(structures, data)
         elif choice == '3':
-            alpha_in = input("Enter Alpha weight for Evaluation (0.0-1.0, default 0.50): ").strip()
-            try:
-                a_val = float(alpha_in) if alpha_in else 0.50
-            except ValueError:
-                a_val = 0.50
-            display_cli_evaluation_matrix(data, alpha=a_val)
+            display_cli_evaluation_matrix(data)
         elif choice == '4':
             cli_survey_mode()
         elif choice in ('0', 'exit', 'quit', 'q'):
@@ -792,4 +786,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] in ('--eval', '--evaluate', '-e'):
+        display_cli_evaluation_matrix()
+    else:
+        main()

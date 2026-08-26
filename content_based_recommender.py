@@ -53,14 +53,22 @@ def fast_extract_names(val):
     return val
 
 
+_CLEAN_TOKEN_RE = re.compile(r'[^a-zA-Z0-9]')
+_CLEAN_TEXT_RE = re.compile(r'[^a-zA-Z0-9\s]')
+_TOKEN_CACHE = {}
+
 def clean_metadata_token(token):
     """
     Converts multi-word tokens into single entity strings (e.g. 'Science Fiction' -> 'sciencefiction',
     'Christopher Nolan' -> 'christophernolan') and lowercases them to prevent ambiguous unigram splits.
     """
-    if not isinstance(token, str):
+    if not isinstance(token, str) or not token:
         return ''
-    return re.sub(r'[^a-zA-Z0-9]', '', token).lower()
+    if token in _TOKEN_CACHE:
+        return _TOKEN_CACHE[token]
+    cleaned = _CLEAN_TOKEN_RE.sub('', token).lower()
+    _TOKEN_CACHE[token] = cleaned
+    return cleaned
 
 
 def parse_delimited_tokens(val, delimiter='|', max_tokens=None):
@@ -72,8 +80,8 @@ def parse_delimited_tokens(val, delimiter='|', max_tokens=None):
     raw_tokens = [t.strip() for t in val.split(delimiter) if t.strip()]
     if max_tokens:
         raw_tokens = raw_tokens[:max_tokens]
-    clean_tokens = [clean_metadata_token(t) for t in raw_tokens if clean_metadata_token(t)]
-    return ' '.join(clean_tokens)
+    clean_tokens = [clean_metadata_token(t) for t in raw_tokens if t]
+    return ' '.join([t for t in clean_tokens if t])
 
 
 def build_metadata_soup(row, genre_weight=3, keyword_weight=2, cast_weight=2, director_weight=3):
@@ -112,8 +120,7 @@ def build_metadata_soup(row, genre_weight=3, keyword_weight=2, cast_weight=2, di
     # 5. Plot Overview / Synopsis
     overview = str(row.get('overview_clean', '')).strip()
     if overview and overview.lower() != 'nan':
-        # Clean overview text
-        overview_clean = re.sub(r'[^a-zA-Z0-9\s]', ' ', overview).lower()
+        overview_clean = _CLEAN_TEXT_RE.sub(' ', overview).lower()
         parts.append(overview_clean)
         
     soup = ' '.join([p for p in parts if p]).strip()
@@ -221,7 +228,19 @@ class ContentBasedRecommender:
             movie_stats['num_of_ratings'] = 0
 
         print("[*] Constructing Weighted Metadata Soups (Genres, Keywords, Cast, Directors, Synopsis)...")
-        movie_stats['metadata_soup'] = movie_stats.apply(build_metadata_soup, axis=1)
+        genres_col = movie_stats['genres_clean'].apply(parse_delimited_tokens)
+        keywords_col = movie_stats['keywords_clean'].apply(parse_delimited_tokens)
+        director_col = movie_stats['director_clean'].apply(parse_delimited_tokens)
+        cast_col = movie_stats['cast_clean'].apply(lambda v: parse_delimited_tokens(v, max_tokens=4))
+        overview_col = movie_stats['overview_clean'].fillna('').astype(str).str.replace(r'[^a-zA-Z0-9\s]', ' ', regex=True).str.lower()
+
+        movie_stats['metadata_soup'] = (
+            (genres_col + ' ') * 3 +
+            (keywords_col + ' ') * 2 +
+            (director_col + ' ') * 3 +
+            (cast_col + ' ') * 2 +
+            overview_col
+        ).str.strip().replace('', 'movie film story')
 
         print("[*] Computing TF-IDF Matrix (Term Frequency-Inverse Document Frequency)...")
         self.vectorizer = TfidfVectorizer(

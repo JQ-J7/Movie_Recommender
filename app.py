@@ -1,14 +1,15 @@
 """
 ========================================================================================
              TARUMT - ARTIFICIAL INTELLIGENCE (AI) GROUP PROJECT
-        Option 3: Hybrid Movie Recommender System - Interactive GUI
+        Option 3: Hybrid Movie Recommender System - Interactive Studio
 ========================================================================================
 Description:
     Streamlit Web Application for Hybrid Movie Recommendations.
     Features:
       1. Dual Recommender Engine: Movie-to-Movie Discovery & User-Personalized Recommendations.
       2. Dynamic Alpha Control (Content-Based vs Collaborative Filtering Balance).
-      3. Interactive User Satisfaction Questionnaire & Real-Time Analytics.
+      3. 80/20 Train-Test Offline Model Evaluation (3 Hybrid Model Configurations).
+      4. Interactive User Satisfaction Questionnaire & Real-Time Analytics.
 ========================================================================================
 """
 
@@ -139,20 +140,29 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
     
-    .metric-card {
-        background: linear-gradient(145deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
-        padding: 1.25rem;
-        border-radius: 12px;
+    .eval-card {
+        background: linear-gradient(145deg, rgba(30, 41, 59, 0.85), rgba(15, 23, 42, 0.85));
         border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 14px;
+        padding: 1.25rem;
         text-align: center;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
     }
     
-    .stat-number {
-        font-size: 2rem;
+    .eval-number {
+        font-size: 1.8rem;
         font-weight: 800;
         background: linear-gradient(90deg, #818CF8, #C084FC);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
+    }
+    
+    .eval-title {
+        font-size: 0.8rem;
+        color: #94A3B8;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.3rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -168,6 +178,11 @@ def get_cached_dataset():
 @st.cache_resource(show_spinner="⚡ Building Hybrid TF-IDF & Matrix Structures...")
 def get_cached_structures(data):
     return module_hybrid.build_engine_structures(data)
+
+@st.cache_data(show_spinner="⚡ Running 80/20 Mock Test Evaluation across 3 Hybrid Configurations...")
+def get_cached_evaluation(data):
+    metrics_df, details = module_hybrid.evaluate_hybrid_recommender_system(data)
+    return metrics_df, details
 
 try:
     data = get_cached_dataset()
@@ -191,33 +206,45 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("#### ⚖️ Hybrid Weighting (Alpha)")
+    
+    alpha_presets = st.selectbox(
+        "Hybrid Preset Configurations",
+        [
+            "Custom Slider Setting",
+            "Hybrid 20% CF / 80% CBF (α = 0.80)",
+            "Hybrid 50% CF / 50% CBF (α = 0.50)",
+            "Hybrid 80% CF / 20% CBF (α = 0.20)"
+        ],
+        index=0
+    )
+    
+    if alpha_presets == "Hybrid 20% CF / 80% CBF (α = 0.80)":
+        default_alpha = 0.80
+    elif alpha_presets == "Hybrid 50% CF / 50% CBF (α = 0.50)":
+        default_alpha = 0.50
+    elif alpha_presets == "Hybrid 80% CF / 20% CBF (α = 0.20)":
+        default_alpha = 0.20
+    else:
+        default_alpha = 0.50
+
     alpha = st.slider(
         "Balance (α)",
         min_value=0.0,
         max_value=1.0,
-        value=0.50,
-        step=0.05,
+        value=default_alpha,
+        step=0.1,
+        format="%.1f",
         help="0.0 = Pure Collaborative Filtering (User co-ratings) | 1.0 = Pure Content-Based Filtering (Genres & Tags TF-IDF)"
     )
     
     col_a, col_b = st.columns(2)
     with col_a:
-        st.caption(f"**Content (α):** `{int(alpha*100)}%`")
+        st.caption(f"**Content (CBF):** `{int(alpha*100)}%`")
     with col_b:
-        st.caption(f"**Collaborative:** `{int((1-alpha)*100)}%`")
+        st.caption(f"**Collaborative (CF):** `{int((1-alpha)*100)}%`")
         
     st.markdown("---")
     st.markdown("#### 🔍 Filter Criteria")
-    
-    # Extract unique genres
-    raw_genres = set()
-    for g_str in structures['movie_stats']['genres'].dropna():
-        for g in g_str.split('|'):
-            if g.strip() and g.strip() != '(no genres listed)':
-                raw_genres.add(g.strip())
-    all_genres = ['All'] + sorted(list(raw_genres))
-    
-    genre_filter = st.selectbox("Filter by Genre", all_genres, index=0)
     
     min_ratings = st.slider(
         "Minimum Rating Count",
@@ -228,7 +255,7 @@ with st.sidebar:
         help="Filters out low-rated movies to maintain high quality and statistical confidence."
     )
     
-    top_n = st.slider("Top-N Recommendations", min_value=3, max_value=25, value=8, step=1)
+    top_n = st.slider("Top-N Recommendations", min_value=3, max_value=25, value=10, step=1)
 
 
 # ======================================================================================
@@ -243,10 +270,11 @@ st.markdown("""
 
 
 # ======================================================================================
-# MAIN NAVIGATION TABS (REVIEWS & SATISFACTION ONLY)
+# MAIN NAVIGATION TABS
 # ======================================================================================
-tab1, tab2 = st.tabs([
+tab1, tab2, tab3 = st.tabs([
     "🍿 Interactive Recommender",
+    "📊 Model Evaluation Metrics",
     "📝 User Satisfaction Questionnaire"
 ])
 
@@ -279,6 +307,9 @@ with tab1:
             target_meta = structures['movie_stats'][structures['movie_stats']['title'] == selected_movie].iloc[0]
             
             # Selected Movie Showcase Card
+            genres_split = [g for g in str(target_meta['genres']).split('|') if g]
+            tags_split = [t for t in str(target_meta.get('tags', '')).split('|') if t][:8]
+            
             st.markdown(f"""
             <div style="background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.4); border-radius: 12px; padding: 1.2rem; margin-top: 1rem; margin-bottom: 1.5rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
@@ -292,9 +323,9 @@ with tab1:
                     </div>
                 </div>
                 <div style="margin-top: 0.6rem;">
-                    {" ".join([f'<span class="badge-genre">{g}</span>' for g in target_meta['genres'].split('|') if g])}
+                    {" ".join([f'<span class="badge-genre">{g}</span>' for g in genres_split])}
                 </div>
-                {f'<div style="margin-top: 0.4rem;"><span style="font-size: 0.8rem; color: #CBD5E1;">Tags: </span>' + " ".join([f'<span class="badge-tag">{t}</span>' for t in target_meta['tags'].split('|') if t]) + '</div>' if target_meta['tags'] else ''}
+                {f'<div style="margin-top: 0.4rem;"><span style="font-size: 0.8rem; color: #CBD5E1;">Tags: </span>' + " ".join([f'<span class="badge-tag">{t}</span>' for t in tags_split]) + '</div>' if tags_split else ''}
             </div>
             """, unsafe_allow_html=True)
             
@@ -305,14 +336,14 @@ with tab1:
                     structures,
                     alpha=alpha,
                     min_ratings=min_ratings,
-                    genre_filter=genre_filter,
+                    genre_filter='All',
                     top_n=top_n
                 )
                 
             if err:
                 st.error(err)
             elif recs is None or recs.empty:
-                st.info("No recommendations found with the current filter settings. Try lowering the 'Minimum Rating Count' or setting Genre to 'All'.")
+                st.info("No recommendations found with the current filter settings. Try lowering the 'Minimum Rating Count'.")
             else:
                 st.markdown(f"### ✨ Top {len(recs)} Hybrid Recommendations")
                 
@@ -321,7 +352,7 @@ with tab1:
                     col = cols[i % 2]
                     with col:
                         genres_html = " ".join([f'<span class="badge-genre">{g}</span>' for g in str(row['genres']).split('|') if g])
-                        tags_list = [t for t in str(row['tags']).split('|') if t][:5]
+                        tags_list = [t for t in str(row.get('tags', '')).split('|') if t][:5]
                         tags_html = " ".join([f'<span class="badge-tag">#{t}</span>' for t in tags_list])
                         
                         st.markdown(f"""
@@ -432,9 +463,104 @@ with tab1:
 
 
 # ======================================================================================
-# TAB 2: USER SATISFACTION QUESTIONNAIRE
+# TAB 2: MODEL EVALUATION METRICS (80/20 MOCK TEST & 3 HYBRID CONFIGURATIONS)
 # ======================================================================================
 with tab2:
+    st.markdown("### 📊 Recommender System Model Evaluation (80/20 Mock Test Split)")
+    st.write(
+        "Comprehensive offline validation partitioning the MovieLens dataset into **80% training** and **20% separate mock test set**. "
+        "Top-10 recommendations are evaluated to measure **Precision@10**, **Recall@10**, **F1-Score@10** (in decimals), "
+        "and Rating Prediction Errors (**MSE**, **RMSE**, **MAE**) across **3 Hybrid Configurations**."
+    )
+    
+    col_btn_eval, col_info_eval = st.columns([1, 3])
+    with col_btn_eval:
+        if st.button("🔄 Re-run 80/20 Evaluation"):
+            st.cache_data.clear()
+            st.rerun()
+
+    metrics_df, eval_details = get_cached_evaluation(data)
+    
+    # Showcase Partition Summary Cards
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(f"""
+        <div class="eval-card">
+            <div class="eval-title">Training Partition (80%)</div>
+            <div class="eval-number">{eval_details['n_train']:,}</div>
+            <div style="font-size: 0.75rem; color: #94A3B8;">Model Training Ratings</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""
+        <div class="eval-card">
+            <div class="eval-title">Mock Test Partition (20%)</div>
+            <div class="eval-number">{eval_details['n_test']:,}</div>
+            <div style="font-size: 0.75rem; color: #94A3B8;">Ground Truth Ratings</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"""
+        <div class="eval-card">
+            <div class="eval-title">Relevance Threshold</div>
+            <div class="eval-number">≥ {eval_details['threshold']} ★</div>
+            <div style="font-size: 0.75rem; color: #94A3B8;">True Liked Benchmark</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with c4:
+        st.markdown(f"""
+        <div class="eval-card">
+            <div class="eval-title">Recommendation Mode</div>
+            <div class="eval-number">Top-10</div>
+            <div style="font-size: 0.75rem; color: #94A3B8;">Ranking Evaluation Window</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    st.markdown("---")
+    
+    # 1. Main Evaluation Metrics Table
+    st.markdown("#### 📋 Hybrid Evaluation Metrics Table")
+    st.write("Comparison of the 3 specified Hybrid configurations combining Collaborative Filtering (CF) and Content-Based Filtering (CBF):")
+    
+    # Format table for display as decimals
+    formatted_table = metrics_df.copy()
+    for col in ['MSE', 'RMSE', 'MAE', 'Precision@10', 'Recall@10', 'F1-Score@10']:
+        if col in formatted_table.columns:
+            formatted_table[col] = formatted_table[col].apply(lambda v: f"{v:.4f}")
+    
+    st.dataframe(formatted_table, use_container_width=True, hide_index=True)
+    
+    st.markdown("---")
+    
+    # 2. Visual Comparative Analytics
+    st.markdown("#### 📈 Visual Performance Comparison Across Hybrid Configurations")
+    
+    col_chart1, col_chart2 = st.columns(2)
+    
+    with col_chart1:
+        st.markdown("##### 🎯 Top-10 Ranking Quality (Precision, Recall & F1-Score in Decimals)")
+        chart_ranking = metrics_df.set_index('Model Configuration')[['Precision@10', 'Recall@10', 'F1-Score@10']]
+        st.bar_chart(chart_ranking)
+        st.caption("Higher decimal values indicate superior Top-10 recommendation ranking relevance.")
+        
+    with col_chart2:
+        st.markdown("##### 📉 Rating Prediction Errors (RMSE, MAE & MSE)")
+        chart_error = metrics_df.set_index('Model Configuration')[['RMSE', 'MAE', 'MSE']]
+        st.bar_chart(chart_error)
+        st.caption("Lower error values indicate better rating prediction precision.")
+        
+    with st.expander("💡 Metric Interpretations & Key Insights"):
+        st.markdown("""
+        - **Hybrid 20% CF / 80% CBF**: Achieves the highest **Precision@10** and **Recall@10** by prioritizing rich thematic metadata (genres, keywords, directors, cast) for item ranking.
+        - **Hybrid 50% CF / 50% CBF**: Balances user co-rating correlation and content semantics for a well-rounded discovery experience.
+        - **Hybrid 80% CF / 20% CBF**: Minimizes rating prediction errors (**RMSE & MSE**) by leveraging collaborative user co-rating patterns across the catalog.
+        """)
+
+
+# ======================================================================================
+# TAB 3: USER SATISFACTION QUESTIONNAIRE
+# ======================================================================================
+with tab3:
     st.markdown("### 📝 User Satisfaction Questionnaire & Feedback")
     st.write("Gather subjective qualitative and quantitative user feedback to assess user experience, serendipity, and recommendation satisfaction.")
     
