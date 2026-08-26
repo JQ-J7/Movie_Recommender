@@ -1,28 +1,17 @@
-"""
 ========================================================================================
              TARUMT - ARTIFICIAL INTELLIGENCE (AI) REPOSITORY
          Content-Based Filtering (CBF) Movie Recommender System
 ========================================================================================
 Description:
-    An end-to-end Content-Based Filtering Recommender Engine implementing:
-    1. Structured Metadata Tokenization (Genres, Plot Overview, Keywords, Cast, Directors).
-    2. Term Frequency-Inverse Document Frequency (TF-IDF) Vectorization (1-2 ngrams, sublinear TF).
-    3. Cosine Similarity & Linear Kernel matching over high-dimensional textual feature space.
-    4. Item Cold-Start capability (generates recommendations for new catalog entries with 0 ratings).
-    5. User-Profile Content-Based Recommendation (preference vector modeling).
-    6. Recommendation Explainability (identifying shared high-weight TF-IDF tokens).
-    7. Comprehensive Model Evaluation:
-       - Rating Prediction: RMSE, MSE, MAE via Similarity-Weighted Rating Estimation.
-       - Ranking Quality: Precision@K, Recall@K, F1@K, Hit Rate@K, Mean Reciprocal Rank (MRR).
-       - Diversity & Catalog Coverage: Intra-List Cosine Distance & Catalog Exposure.
-    8. Multi-strategy Intelligent Search Engine (Exact, Substring, Metadata, and Fuzzy).
+    Content-Based Movie Recommender Engine using TF-IDF and Cosine Similarity
+    on metadata (genres, keywords,and plot overview).
 
-Academic References:
-    - Mehta, S., & Kamdar, R. (2022). "Movie Recommendation System Using Content-Based 
-      Filtering". arXiv:2212.00139. https://arxiv.org/pdf/2212.00139
-    - Reddy, S. R. S., et al. (2019). "Content-Based Movie Recommendation System Using 
-      Genre Correlation and Metadata Filtering". International Journal of Engineering 
-      and Advanced Technology (IJEAT).
+Key Features:
+    1. Weighted Metadata Vectorization (TF-IDF & Cosine Similarity).
+    2. Intelligent Search Engine (Exact, Substring, Fuzzy & Article Normalization).
+    3. Top-10 Similar Movie Recommendations with Token-level Explainability.
+    4. Comprehensive Offline Evaluation (80/20 Split: RMSE, MAE, Precision, Recall, F1).
+    5. Interactive Console Interface & Metadata Analytics.
 ========================================================================================
 """
 
@@ -254,12 +243,16 @@ class ContentBasedRecommender:
     def get_similar_movies(self, target_title, top_n=10, min_similarity=0.01):
         """
         Computes Cosine Similarity between the target movie and all other movies in the catalog.
+        Enforces a maximum limit of 10 recommendations.
         
         Returns:
             pd.DataFrame: Top similar movies with similarity scores and metadata.
         """
         if target_title not in self.title_to_idx:
             return None
+            
+        # Enforce maximum limit of 10 movies
+        top_n = min(max(1, int(top_n)), 10)
             
         target_idx = self.title_to_idx[target_title]
         target_vector = self.tfidf_matrix[target_idx]
@@ -579,52 +572,71 @@ def evaluate_content_based_system(cbf_model, data, test_size=0.2, random_state=4
     train_df, test_df = train_test_split(data, test_size=test_size, random_state=random_state)
     
     print("Training the CBF Model on Train set...")
-    train_user_ratings = train_df.groupby('userId').apply(lambda g: dict(zip(g['title'], g['rating']))).to_dict()
+    # Build per-user rating histories with a single fast groupby pass instead of
+    # a per-group lambda .apply(), which is slow on large datasets.
+    train_user_ratings = {}
+    for u, title, rating in zip(train_df['userId'], train_df['title'], train_df['rating']):
+        train_user_ratings.setdefault(u, {})[title] = rating
+        
     global_mean = train_df['rating'].mean()
     movie_means = train_df.groupby('title')['rating'].mean().to_dict()
     
     print("Evaluating Predictions (MSE, RMSE)...")
-    actuals = []
-    cb_preds = []
     
     # Evaluate on a stratified sample of test interactions for rapid validation
     eval_sample = test_df.sample(n=min(5000, len(test_df)), random_state=random_state)
+    actuals = eval_sample['rating'].to_numpy()
     
-    for _, row in eval_sample.iterrows():
-        u = row['userId']
-        target_movie = row['title']
-        actual_rating = row['rating']
-        
-        actuals.append(actual_rating)
-        
-        # Predict rating using user's train items weighted by cosine similarity
+    # Pre-resolve each user's train-history TF-IDF sub-matrix ONCE per user
+    # (not once per test row) so repeat users don't redo the same lookup/slicing.
+    user_hist_cache = {}  # userId -> (hist_matrix, hist_ratings_array, hist_title_set)
+    
+    def get_user_hist(u):
+        if u in user_hist_cache:
+            return user_hist_cache[u]
         user_history = train_user_ratings.get(u, {})
-        if target_movie in cbf_model.title_to_idx and user_history:
+        hist_titles = [t for t in user_history if t in cbf_model.title_to_idx]
+        if hist_titles:
+            hist_idxs = [cbf_model.title_to_idx[t] for t in hist_titles]
+            hist_matrix = cbf_model.tfidf_matrix[hist_idxs]           # (n_hist, n_features) sparse
+            hist_ratings = np.array([user_history[t] for t in hist_titles], dtype=float)
+        else:
+            hist_matrix, hist_ratings, hist_titles = None, None, []
+        result = (hist_matrix, hist_ratings, hist_titles)
+        user_hist_cache[u] = result
+        return result
+    
+    cb_preds = np.empty(len(eval_sample), dtype=float)
+    
+    for i, (u, target_movie) in enumerate(zip(eval_sample['userId'], eval_sample['title'])):
+        hist_matrix, hist_ratings, hist_titles = get_user_hist(u)
+        predicted = None
+        
+        if target_movie in cbf_model.title_to_idx and hist_matrix is not None:
             target_idx = cbf_model.title_to_idx[target_movie]
             target_vec = cbf_model.tfidf_matrix[target_idx]
             
-            sim_sum = 0.0
-            weighted_rating_sum = 0.0
-            
-            for hist_title, hist_rating in user_history.items():
-                if hist_title in cbf_model.title_to_idx and hist_title != target_movie:
-                    h_idx = cbf_model.title_to_idx[hist_title]
-                    sim = float(linear_kernel(target_vec, cbf_model.tfidf_matrix[h_idx])[0, 0])
-                    if sim > 0.05:
-                        sim_sum += sim
-                        weighted_rating_sum += sim * hist_rating
-                        
-            if sim_sum > 0:
-                predicted = weighted_rating_sum / sim_sum
+            # Exclude the target movie itself from its own history, if present
+            if target_movie in hist_titles:
+                keep_mask = np.array([t != target_movie for t in hist_titles])
+                calc_matrix = hist_matrix[keep_mask]
+                calc_ratings = hist_ratings[keep_mask]
             else:
-                predicted = movie_means.get(target_movie, global_mean)
-        else:
+                calc_matrix = hist_matrix
+                calc_ratings = hist_ratings
+                
+            if calc_matrix is not None and calc_matrix.shape[0] > 0:
+                # ONE batched similarity call against the user's whole history,
+                # instead of one linear_kernel call per history item.
+                sims = linear_kernel(target_vec, calc_matrix).flatten()
+                mask = sims > 0.05
+                if mask.any():
+                    predicted = float(np.dot(sims[mask], calc_ratings[mask]) / sims[mask].sum())
+                    
+        if predicted is None:
             predicted = movie_means.get(target_movie, global_mean)
             
-        cb_preds.append(float(np.clip(predicted, 0.5, 5.0)))
-        
-    actuals = np.array(actuals)
-    cb_preds = np.array(cb_preds)
+        cb_preds[i] = float(np.clip(predicted, 0.5, 5.0))
     
     # Calculate Prediction Errors
     mse_cb = mean_squared_error(actuals, cb_preds)
@@ -810,11 +822,28 @@ def get_recommendations_by_movie_mode(cbf_model):
             else:
                 target_movie = matches[0]
                 
-        try:
-            top_n_input = input("Enter number of recommendations to display [default 10]: ").strip()
-            top_n = int(top_n_input) if top_n_input.isdigit() and int(top_n_input) > 0 else 10
-        except (EOFError, KeyboardInterrupt):
-            top_n = 10
+        while True:
+            try:
+                top_n_input = input("Enter number of recommendations to display [1-10, default 10]: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                top_n = 10
+                break
+                
+            if not top_n_input:
+                top_n = 10
+                break
+                
+            if not top_n_input.isdigit() or int(top_n_input) < 1:
+                print("[!] Error: Please enter a valid positive number between 1 and 10.")
+                continue
+                
+            val = int(top_n_input)
+            if val > 10:
+                print("[!] Error: The maximum recommend is 10. Please enter a number between 1 and 10.")
+                continue
+                
+            top_n = val
+            break
             
         print(f"\n[*] Computing Content Similarity (TF-IDF & Cosine) for: '{target_movie}'...\n")
         recs = cbf_model.get_similar_movies(target_movie, top_n=top_n)
@@ -865,7 +894,7 @@ def main():
         print("-"*50)
         print("[1] Search for a movie")
         print("[2] Get recommendations by movie")
-        print("[3] Run Recommender System Evaluation (RMSE/MAE/F1)")
+        print("[3] Run Recommender System Evaluation (RMSE/MSE/Precision/Recall/F1)")
         print("[0] Exit")
         print("-"*50)
         
