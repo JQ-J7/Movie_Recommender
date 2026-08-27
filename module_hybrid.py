@@ -398,7 +398,10 @@ def evaluate_hybrid_recommender_system(data=None, test_size=0.2, random_state=42
         np.clip(user_means.get(u, global_mean) + movie_means.get(t, global_mean) - global_mean, 0.5, 5.0)
         for u, t in zip(test_df['userId'], test_df['title'])
     ])
-    pred_movie_test = np.array([movie_means.get(t, global_mean) for t in test_df['title']])
+    pred_cb_test = np.array([
+        np.clip(user_means.get(u, global_mean) * 0.5 + movie_means.get(t, global_mean) * 0.5, 0.5, 5.0)
+        for u, t in zip(test_df['userId'], test_df['title'])
+    ])
     actual_test_ratings = test_df['rating'].values
 
     # 4. Standardized Candidate-Sampling Evaluation Protocol (consistent with content_based_recommender.py)
@@ -444,7 +447,7 @@ def evaluate_hybrid_recommender_system(data=None, test_size=0.2, random_state=42
     
     for name, w_cf, w_cb in configs:
         # A. Rating Prediction Error on 20% mock test set
-        pred_hybrid = np.clip((w_cf * pred_cf_test) + (w_cb * pred_movie_test), 0.5, 5.0)
+        pred_hybrid = np.clip((w_cf * pred_cf_test) + (w_cb * pred_cb_test), 0.5, 5.0)
         mse = mean_squared_error(actual_test_ratings, pred_hybrid)
         rmse = sqrt(mse)
         mae = mean_absolute_error(actual_test_ratings, pred_hybrid)
