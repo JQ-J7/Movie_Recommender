@@ -616,7 +616,7 @@ def cli_movie_search_mode(structures):
     print("\nMatching Movies:")
     for idx, m in enumerate(matches, 1):
         row = structures['movie_stats'][structures['movie_stats']['title'] == m].iloc[0]
-        print(f"  [{idx}] {m} (Rating: {row['avg_rating']} ★, Reviews: {row['num_of_ratings']})")
+        print(f"  [{idx}] {m} (Rating: {row['avg_rating']} / 5.0, Reviews: {row['num_of_ratings']})")
         
     sel = input(f"\nSelect movie [1-{len(matches)}] (default 1): ").strip()
     if sel.isdigit() and 1 <= int(sel) <= len(matches):
@@ -625,9 +625,9 @@ def cli_movie_search_mode(structures):
         target = matches[0]
         
     print("\nSelect Hybrid Configuration / Alpha Weight:")
-    print("  [1] Hybrid 20% CF / 80% CBF (α = 0.80)")
-    print("  [2] Hybrid 50% CF / 50% CBF (α = 0.50) [Default]")
-    print("  [3] Hybrid 80% CF / 20% CBF (α = 0.20)")
+    print("  [1] Hybrid 20% CF / 80% CBF (alpha = 0.80)")
+    print("  [2] Hybrid 50% CF / 50% CBF (alpha = 0.50) [Default]")
+    print("  [3] Hybrid 80% CF / 20% CBF (alpha = 0.20)")
     print("  [4] Custom Alpha Value (0.00 - 1.00)")
     
     preset_choice = input("Option [1-4, default 2]: ").strip()
@@ -644,7 +644,7 @@ def cli_movie_search_mode(structures):
     else:
         alpha = 0.50
         
-    print(f"\n[*] Generating Hybrid Recommendations for '{target}' (Content α = {alpha:.2f}, Collab = {1-alpha:.2f})...")
+    print(f"\n[*] Generating Hybrid Recommendations for '{target}' (Content alpha = {alpha:.2f}, Collab = {1-alpha:.2f})...")
     recs, err = get_hybrid_recommendations(target, structures, alpha=alpha, top_n=10)
     
     if err:
@@ -653,49 +653,6 @@ def cli_movie_search_mode(structures):
         print("[!] No recommendations found with current criteria.")
     else:
         print(f"\n>>> Top {len(recs)} Hybrid Recommendations for '{target}':")
-        cols = ['title', 'hybrid_score', 'cb_score', 'cf_score', 'avg_rating', 'genres']
-        display_df = recs[cols].copy()
-        display_df.columns = ['Title', 'Hybrid %', 'Content %', 'Collab %', 'Rating', 'Genres']
-        print(display_df.to_string(index=False))
-
-
-def cli_user_recommendation_mode(structures, data):
-    """Interactive personalized user recommendation in terminal."""
-    print("\n" + "-" * 60)
-    print("       USER PERSONALIZED HYBRID DISCOVERY (CLI)")
-    print("-" * 60)
-    
-    u_input = input("Enter User ID (e.g. 1, 10, 42) or 'b' for back: ").strip()
-    if u_input.lower() in ('b', 'back', ''):
-        return
-        
-    try:
-        uid = int(u_input)
-    except ValueError:
-        print("[!] Invalid user ID.")
-        return
-        
-    print("\nSelect Hybrid Configuration / Alpha Weight:")
-    print("  [1] Hybrid 20% CF / 80% CBF (α = 0.80)")
-    print("  [2] Hybrid 50% CF / 50% CBF (α = 0.50) [Default]")
-    print("  [3] Hybrid 80% CF / 20% CBF (α = 0.20)")
-    preset_choice = input("Option [1-3, default 2]: ").strip()
-    if preset_choice == '1':
-        alpha = 0.80
-    elif preset_choice == '3':
-        alpha = 0.20
-    else:
-        alpha = 0.50
-        
-    print(f"\n[*] Calculating personalized recommendations for User #{uid} (α = {alpha:.2f})...")
-    recs, err = get_user_personalized_recommendations(uid, structures, data, alpha=alpha, top_n=10)
-    
-    if err:
-        print(f"[!] Error: {err}")
-    elif recs is None or recs.empty:
-        print(f"[!] No recommendations found for user #{uid}.")
-    else:
-        print(f"\n>>> Top {len(recs)} Personalized Recommendations for User #{uid}:")
         cols = ['title', 'hybrid_score', 'cb_score', 'cf_score', 'avg_rating', 'genres']
         display_df = recs[cols].copy()
         display_df.columns = ['Title', 'Hybrid %', 'Content %', 'Collab %', 'Rating', 'Genres']
@@ -758,14 +715,13 @@ def main():
         print("          HYBRID RECOMMENDER MAIN MENU")
         print("=" * 50)
         print("  [1] Search Movie & Get Hybrid Recommendations")
-        print("  [2] Get User-Personalized Recommendations")
-        print("  [3] Run 80/20 Mock Test Evaluation Matrix (3 Hybrid Models)")
-        print("  [4] User Satisfaction Questionnaire (Submit/View)")
+        print("  [2] Run 80/20 Mock Test Evaluation Matrix (3 Hybrid Models)")
+        print("  [3] User Satisfaction Questionnaire (Submit/View)")
         print("  [0] Exit")
         print("=" * 50)
         
         try:
-            choice = input("Enter your option [0-4]: ").strip()
+            choice = input("Enter your option [0-3]: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nExiting. Goodbye!")
             break
@@ -773,16 +729,14 @@ def main():
         if choice == '1':
             cli_movie_search_mode(structures)
         elif choice == '2':
-            cli_user_recommendation_mode(structures, data)
-        elif choice == '3':
             display_cli_evaluation_matrix(data)
-        elif choice == '4':
+        elif choice == '3':
             cli_survey_mode()
         elif choice in ('0', 'exit', 'quit', 'q'):
             print("\nThank you for using the Hybrid Recommender System. Goodbye!")
             break
         else:
-            print("[!] Invalid option. Please enter 0, 1, 2, 3, or 4.")
+            print("[!] Invalid option. Please enter 0, 1, 2, or 3.")
 
 
 if __name__ == '__main__':
