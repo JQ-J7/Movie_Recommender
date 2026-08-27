@@ -11,7 +11,7 @@ Description:
 Key Capabilities:
     1. Dedicated Movie Search Engine (Instant lookup of Title, Genres, Ratings & Plot).
     2. Fast Item-Based Collaborative Filtering (Pearson Correlation Matrix).
-    3. Comprehensive Model Evaluation (80/20 Train-Test split for RMSE, MSE, MAE & Precision/Recall/F1).
+    3. Comprehensive Model Evaluation (80/20 Train-Test split for RMSE, MSE & Precision/Recall/F1).
     4. Dataset Explorer & Sparsity Analysis.
     5. Clean Interactive Console User Interface.
 ========================================================================================
@@ -473,7 +473,6 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     ]
     mse = mean_squared_error(test_df['rating'], pred_combined)
     rmse = sqrt(mse)
-    mae = mean_absolute_error(test_df['rating'], pred_combined)
     
     # 2. Top-10 Recommendation Accuracy on 20% Mock Test Set
     train_user_movies = train_df.groupby('userId')['movieId'].apply(set).to_dict()
@@ -530,8 +529,7 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     
     error_table = pd.DataFrame([
         {"Metric": "Mean Squared Error (MSE)", "Score Value": f"{mse:.4f}", "Scale Percentage": f"{(mse / 5.0)*100:.2f}%", "Description": "Variance of prediction errors across test ratings"},
-        {"Metric": "Root Mean Squared Error (RMSE)", "Score Value": f"{rmse:.4f}", "Scale Percentage": f"{(rmse / 5.0)*100:.2f}%", "Description": "Average deviation on standard 1-5 star scale"},
-        {"Metric": "Mean Absolute Error (MAE)", "Score Value": f"{mae:.4f}", "Scale Percentage": f"{(mae / 5.0)*100:.2f}%", "Description": "Mean absolute difference between true and predicted ratings"}
+        {"Metric": "Root Mean Squared Error (RMSE)", "Score Value": f"{rmse:.4f}", "Scale Percentage": f"{(rmse / 5.0)*100:.2f}%", "Description": "Average deviation on standard 1-5 star scale"}
     ])
     
     quality_table = pd.DataFrame([
@@ -549,7 +547,6 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
         'top_k': top_k,
         'mse': float(mse),
         'rmse': float(rmse),
-        'mae': float(mae),
         'precision': float(mean_prec),
         'recall': float(mean_rec),
         'f1_score': float(mean_f1),

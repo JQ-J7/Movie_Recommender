@@ -758,7 +758,7 @@ where:
         st.markdown("### Collaborative Filtering Model Evaluation & Analytics (80/20 Split)")
         st.write(
             "Evaluation of the pure **Item-Based Collaborative Filtering (CF)** engine on an **80/20 Train-Test partition**. "
-            "Evaluates rating prediction accuracy (**MSE, RMSE, MAE**), Top-10 discovery performance (**Precision@10, Recall@10, F1-Score@10, Average Hits**), "
+            "Evaluates rating prediction accuracy (**MSE, RMSE**), Top-10 discovery performance (**Precision@10, Recall@10, F1-Score@10, Average Hits**), "
             "and rating interaction matrix sparsity."
         )
         
@@ -851,10 +851,10 @@ where:
             st.caption("Decimal representation of Top-10 ranking metrics on the 20% test partition.")
             
         with col_cf_c2:
-            st.markdown("##### Rating Prediction Error Distribution")
+            st.markdown("##### Rating Prediction Error Distribution (RMSE & MSE)")
             cf_err_df = pd.DataFrame({
-                'Error Metric': ['RMSE', 'MAE', 'MSE'],
-                'Score': [cf_eval['rmse'], cf_eval['mae'], cf_eval['mse']]
+                'Error Metric': ['RMSE', 'MSE'],
+                'Score': [cf_eval['rmse'], cf_eval['mse']]
             }).set_index('Error Metric')
             st.bar_chart(cf_err_df)
             st.caption("Magnitude of rating deviation between predicted baseline ratings and ground truth test ratings.")
