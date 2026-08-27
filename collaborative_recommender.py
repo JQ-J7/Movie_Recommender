@@ -451,6 +451,7 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     Evaluates the recommender system using an 80/20 Train-Test split based on assignment requirements:
       1. Rating Prediction Error (MSE, RMSE, MAE) -> Assignment Requirement 3.d.ii
       2. Top-10 Recommendation Evaluation (Precision@10, Recall@10, F1@10, Hits) -> Assignment Requirement 3.d.i
+    Returns a comprehensive metrics dictionary for programmatic and GUI access.
     """
     print("\n" + "="*75)
     print("      [EVALUATION] RECOMMENDER SYSTEM ACCURACY (80/20 Train-Test Split)")
@@ -502,10 +503,10 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
         precisions_k.append(hits / top_k)
         recalls_k.append(hits / len(true_items))
         
-    mean_prec = np.mean(precisions_k)
-    mean_rec = np.mean(recalls_k)
-    mean_f1 = (2 * mean_prec * mean_rec) / (mean_prec + mean_rec) if (mean_prec + mean_rec) > 0 else 0
-    avg_hits = np.mean(total_hits)
+    mean_prec = float(np.mean(precisions_k)) if precisions_k else 0.0
+    mean_rec = float(np.mean(recalls_k)) if recalls_k else 0.0
+    mean_f1 = float((2 * mean_prec * mean_rec) / (mean_prec + mean_rec)) if (mean_prec + mean_rec) > 0 else 0.0
+    avg_hits = float(np.mean(total_hits)) if total_hits else 0.0
     
     # Output Table 1: Rating Prediction Error
     print("--- [1] Rating Prediction Error ---")
@@ -526,63 +527,81 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     ]
     print_ascii_table(headers_2, rows_2, alignments=['left', 'center', 'center'])
     print("="*75 + "\n")
+    
+    error_table = pd.DataFrame([
+        {"Metric": "Mean Squared Error (MSE)", "Score Value": f"{mse:.4f}", "Scale Percentage": f"{(mse / 5.0)*100:.2f}%", "Description": "Variance of prediction errors across test ratings"},
+        {"Metric": "Root Mean Squared Error (RMSE)", "Score Value": f"{rmse:.4f}", "Scale Percentage": f"{(rmse / 5.0)*100:.2f}%", "Description": "Average deviation on standard 1-5 star scale"},
+        {"Metric": "Mean Absolute Error (MAE)", "Score Value": f"{mae:.4f}", "Scale Percentage": f"{(mae / 5.0)*100:.2f}%", "Description": "Mean absolute difference between true and predicted ratings"}
+    ])
+    
+    quality_table = pd.DataFrame([
+        {"Metric": f"Precision@{top_k}", "Decimal Score": f"{mean_prec:.4f}", "Percentage Score": f"{mean_prec*100:.2f}%", "Description": f"Proportion of recommended Top-{top_k} movies that are truly relevant"},
+        {"Metric": f"Recall@{top_k}", "Decimal Score": f"{mean_rec:.4f}", "Percentage Score": f"{mean_rec*100:.2f}%", "Description": f"Proportion of user's liked test movies captured in Top-{top_k}"},
+        {"Metric": f"F1-Score@{top_k}", "Decimal Score": f"{mean_f1:.4f}", "Percentage Score": f"{mean_f1*100:.2f}%", "Description": "Harmonic mean balancing precision and recall"},
+        {"Metric": f"Average Hits@{top_k}", "Decimal Score": f"{avg_hits:.2f}", "Percentage Score": f"{(avg_hits / top_k)*100:.1f}%", "Description": f"Average number of relevant movies discovered per test user"}
+    ])
+    
+    return {
+        'n_train': len(train_df),
+        'n_test': len(test_df),
+        'test_size': test_size,
+        'threshold': relevance_threshold,
+        'top_k': top_k,
+        'mse': float(mse),
+        'rmse': float(rmse),
+        'mae': float(mae),
+        'precision': float(mean_prec),
+        'recall': float(mean_rec),
+        'f1_score': float(mean_f1),
+        'avg_hits': float(avg_hits),
+        'eval_users_count': len(test_user_relevant),
+        'error_table': error_table,
+        'quality_table': quality_table
+    }
 
 
 # ======================================================================================
 # 6. DATASET SUMMARY & ANALYTICS MODULE
 # ======================================================================================
 
+def get_dataset_summary_metrics(data):
+    """
+    Computes comprehensive statistics and dataset properties.
+    """
+    num_ratings = len(data)
+    num_users = data['userId'].nunique()
+    num_movies = data['movieId'].nunique() if 'movieId' in data.columns else data['title'].nunique()
+    total_possible = num_users * num_movies
+    sparsity = (1.0 - (num_ratings / total_possible)) * 100 if total_possible > 0 else 0.0
+    global_mean = data['rating'].mean()
+    
+    return {
+        'num_ratings': num_ratings,
+        'num_users': num_users,
+        'num_movies': num_movies,
+        'total_possible': total_possible,
+        'sparsity': sparsity,
+        'global_mean': global_mean
+    }
+
+
 def display_dataset_summary(data):
     """
-    Displays comprehensive statistics and dataset properties, including Top-10 Collaborative Recommendations.
+    Displays comprehensive statistics and dataset properties in CLI.
     """
     print("\n" + "="*75)
     print("              [ANALYTICS] DATASET SUMMARY & EXPLORATORY METRICS")
     print("="*75)
     
-    num_ratings = len(data)
-    num_users = data['userId'].nunique()
-    num_movies = data['movieId'].nunique()
-    total_possible = num_users * num_movies
-    sparsity = (1.0 - (num_ratings / total_possible)) * 100
-    global_mean = data['rating'].mean()
+    stats = get_dataset_summary_metrics(data)
     
-    print(f"Total User Ratings   : {num_ratings:,}")
-    print(f"Unique Users         : {num_users:,}")
-    print(f"Unique Movies        : {num_movies:,}")
+    print(f"Total User Ratings   : {stats['num_ratings']:,}")
+    print(f"Unique Users         : {stats['num_users']:,}")
+    print(f"Unique Movies        : {stats['num_movies']:,}")
     print(f"Rating Scale         : {data['rating'].min()} to {data['rating'].max()} stars")
-    print(f"Average Rating       : {global_mean:.2f} stars")
-    print(f"Rating Matrix Size   : {num_users} x {num_movies} ({total_possible:,} cells)")
-    print(f"Matrix Sparsity      : {sparsity:.2f}% (Standard in Recommender Systems)")
-    
-    genre_col = 'genres_clean' if 'genres_clean' in data.columns else 'genres'
-    movie_stats = data.groupby('title').agg(
-        num_ratings=('rating', 'count'),
-        avg_rating=('rating', 'mean'),
-        genres=(genre_col, 'first')
-    ).reset_index()
-    
-    # Top 10 Collaborative Recommended Movies (Bayesian Quality Weighted, Min 50 Ratings)
-    m = 50  # minimum rating count threshold
-    v = movie_stats['num_ratings']
-    R = movie_stats['avg_rating']
-    C = global_mean
-    movie_stats['weighted_score'] = (v / (v + m)) * R + (m / (v + m)) * C
-    
-    top_collab = movie_stats[movie_stats['num_ratings'] >= m].sort_values('weighted_score', ascending=False).head(10).reset_index(drop=True)
-    print("\n--- Top 10 Collaborative Recommended Movies (Quality Weighted, Min 50 Ratings) ---")
-    headers_collab = ["#", "Movie Title", "Ratings", "Avg Rating", "Weighted Score", "Genres"]
-    rows_collab = []
-    for i, row in enumerate(top_collab.to_dict('records'), 1):
-        title = str(row['title'])
-        if len(title) > 30:
-            title = title[:27] + "..."
-        genres_str = str(row['genres']).replace('|', ' | ') if row['genres'] else 'N/A'
-        if len(genres_str) > 32:
-            genres_str = genres_str[:29] + "..."
-        rows_collab.append([str(i), title, f"{int(row['num_ratings']):,}", f"{row['avg_rating']:.2f}/5.0", f"{row['weighted_score']:.2f}", genres_str])
-        
-    print_ascii_table(headers_collab, rows_collab, alignments=['center', 'left', 'right', 'center', 'center', 'left'])
+    print(f"Average Rating       : {stats['global_mean']:.2f} stars")
+    print(f"Rating Matrix Size   : {stats['num_users']} x {stats['num_movies']} ({stats['total_possible']:,} cells)")
+    print(f"Matrix Sparsity      : {stats['sparsity']:.2f}% (Standard in Recommender Systems)")
     print("="*75 + "\n")
 
 

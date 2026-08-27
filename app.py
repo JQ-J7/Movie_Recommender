@@ -20,6 +20,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import module_hybrid
+import collaborative_recommender
 
 # ======================================================================================
 # 1. PAGE CONFIGURATION & HIGH-END ACADEMIC THEME
@@ -319,6 +320,14 @@ def get_cached_evaluation(data):
     metrics_df, details = module_hybrid.evaluate_hybrid_recommender_system(data)
     return metrics_df, details
 
+@st.cache_data(show_spinner="Running 80/20 Train-Test Evaluation for Collaborative Filtering...")
+def get_cached_cf_evaluation(data):
+    return collaborative_recommender.evaluate_recommender_system(data)
+
+@st.cache_data(show_spinner="Computing Collaborative Dataset Analytics...")
+def get_cached_cf_summary(data):
+    return collaborative_recommender.get_dataset_summary_metrics(data)
+
 try:
     data = get_cached_dataset()
     structures = get_cached_structures(data)
@@ -540,9 +549,10 @@ if st.session_state.view_mode == "user":
 # ======================================================================================
 else:
     # Developer View Main Tabs
-    dev_tab1, dev_tab2, dev_tab3 = st.tabs([
+    dev_tab1, dev_tab2, dev_tab3, dev_tab4 = st.tabs([
         "Hybrid Engine Settings",
         "Model Evaluation Metrics (80/20 Split)",
+        "Collaborative Filtering Evaluation",
         "Survey Analytics & Respondent Audit"
     ])
     
@@ -742,9 +752,141 @@ where:
             """)
 
     # ----------------------------------------------------------------------------------
-    # DEV TAB 3: USER SATISFACTION SURVEY ANALYTICS & RESPONDENT AUDIT
+    # DEV TAB 3: COLLABORATIVE FILTERING EVALUATION & ANALYTICS
     # ----------------------------------------------------------------------------------
     with dev_tab3:
+        st.markdown("### Collaborative Filtering Model Evaluation & Analytics (80/20 Split)")
+        st.write(
+            "Evaluation of the pure **Item-Based Collaborative Filtering (CF)** engine on an **80/20 Train-Test partition**. "
+            "Evaluates rating prediction accuracy (**MSE, RMSE, MAE**), Top-10 discovery performance (**Precision@10, Recall@10, F1-Score@10, Average Hits**), "
+            "and rating interaction matrix sparsity."
+        )
+        
+        col_cf_btn, col_cf_info = st.columns([1.2, 3])
+        with col_cf_btn:
+            if st.button("Re-run Collaborative Evaluation", use_container_width=True, key="btn_rerun_cf"):
+                st.cache_data.clear()
+                st.rerun()
+
+        cf_eval = get_cached_cf_evaluation(data)
+        cf_summary = get_cached_cf_summary(data)
+        
+        # 6 KPI Metric Cards
+        k1, k2, k3, k4, k5, k6 = st.columns(6)
+        with k1:
+            st.markdown(f"""
+            <div class="eval-card">
+                <div class="eval-title">Train Partition (80%)</div>
+                <div class="eval-number">{cf_eval['n_train']:,}</div>
+                <div style="font-size: 0.75rem; color: #94A3B8;">Training Ratings</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with k2:
+            st.markdown(f"""
+            <div class="eval-card">
+                <div class="eval-title">Mock Test (20%)</div>
+                <div class="eval-number">{cf_eval['n_test']:,}</div>
+                <div style="font-size: 0.75rem; color: #94A3B8;">Ground Truth Ratings</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with k3:
+            st.markdown(f"""
+            <div class="eval-card">
+                <div class="eval-title">Prediction RMSE</div>
+                <div class="eval-number">{cf_eval['rmse']:.4f}</div>
+                <div style="font-size: 0.75rem; color: #94A3B8;">Avg Star Error</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with k4:
+            st.markdown(f"""
+            <div class="eval-card">
+                <div class="eval-title">Precision@10</div>
+                <div class="eval-number">{cf_eval['precision']:.4f}</div>
+                <div style="font-size: 0.75rem; color: #94A3B8;">{cf_eval['precision']*100:.2f}% Accuracy</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with k5:
+            st.markdown(f"""
+            <div class="eval-card">
+                <div class="eval-title">Recall@10</div>
+                <div class="eval-number">{cf_eval['recall']:.4f}</div>
+                <div style="font-size: 0.75rem; color: #94A3B8;">{cf_eval['recall']*100:.2f}% Coverage</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with k6:
+            st.markdown(f"""
+            <div class="eval-card">
+                <div class="eval-title">F1-Score@10</div>
+                <div class="eval-number">{cf_eval['f1_score']:.4f}</div>
+                <div style="font-size: 0.75rem; color: #94A3B8;">{cf_eval['f1_score']*100:.2f}% Harmonic Mean</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        st.markdown("---")
+        
+        # Section 1 & 2 Tables
+        col_tbl1, col_tbl2 = st.columns(2)
+        
+        with col_tbl1:
+            st.markdown("#### Rating Prediction Error Benchmark")
+            st.write("Collaborative user & item baseline bias prediction error on the 20% mock test set:")
+            st.dataframe(cf_eval['error_table'], use_container_width=True, hide_index=True)
+            
+        with col_tbl2:
+            st.markdown("#### Top-10 Recommendation Quality (Mock Test)")
+            st.write("Top-10 ranked recommendation retrieval metrics against test ground-truth liked items (>= 3.5 stars):")
+            st.dataframe(cf_eval['quality_table'], use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        
+        # Visual Charts
+        col_cf_c1, col_cf_c2 = st.columns(2)
+        with col_cf_c1:
+            st.markdown("##### Top-10 Recommendation Quality Metrics")
+            cf_rank_df = pd.DataFrame({
+                'Metric': ['Precision@10', 'Recall@10', 'F1-Score@10'],
+                'Score': [cf_eval['precision'], cf_eval['recall'], cf_eval['f1_score']]
+            }).set_index('Metric')
+            st.bar_chart(cf_rank_df)
+            st.caption("Decimal representation of Top-10 ranking metrics on the 20% test partition.")
+            
+        with col_cf_c2:
+            st.markdown("##### Rating Prediction Error Distribution")
+            cf_err_df = pd.DataFrame({
+                'Error Metric': ['RMSE', 'MAE', 'MSE'],
+                'Score': [cf_eval['rmse'], cf_eval['mae'], cf_eval['mse']]
+            }).set_index('Error Metric')
+            st.bar_chart(cf_err_df)
+            st.caption("Magnitude of rating deviation between predicted baseline ratings and ground truth test ratings.")
+
+        st.markdown("---")
+        
+        # Section 3: Matrix Sparsity & Dataset Analytics
+        st.markdown("#### Collaborative Interaction Matrix & Sparsity Analytics")
+        
+        col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+        with col_m1:
+            st.metric("Total Ratings", f"{cf_summary['num_ratings']:,}")
+        with col_m2:
+            st.metric("Unique Users", f"{cf_summary['num_users']:,}")
+        with col_m3:
+            st.metric("Unique Movies", f"{cf_summary['num_movies']:,}")
+        with col_m4:
+            st.metric("Matrix Cells", f"{cf_summary['total_possible']:,}")
+        with col_m5:
+            st.metric("Matrix Sparsity", f"{cf_summary['sparsity']:.2f}%")
+            
+        st.markdown(f"""
+        <div class="status-panel" style="margin-top: 0.8rem;">
+            <b>Sparsity Insight:</b> The user-item rating matrix contains <b>{cf_summary['num_users']:,} users</b> and <b>{cf_summary['num_movies']:,} movies</b> ({cf_summary['total_possible']:,} possible interaction cells). 
+            With <b>{cf_summary['num_ratings']:,} actual ratings</b>, the interaction matrix is <b>{cf_summary['sparsity']:.2f}% sparse</b>. Item-Based Pearson correlation effectively handles this sparsity by calculating similarity only across users who have co-rated both movies.
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ----------------------------------------------------------------------------------
+    # DEV TAB 4: USER SATISFACTION SURVEY ANALYTICS & RESPONDENT AUDIT
+    # ----------------------------------------------------------------------------------
+    with dev_tab4:
         st.markdown("### User Satisfaction Questionnaire Analytics & Audit")
         st.write("Detailed administrative inspection of user evaluations, respondent identities, and dimension distributions.")
         
