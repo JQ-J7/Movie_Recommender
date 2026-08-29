@@ -694,7 +694,7 @@ def cli_survey_mode():
 
 def main():
     print("=" * 78)
-    print("      HYBRID MOVIE RECOMMENDER SYSTEM (module_hybrid.py)")
+    print("      HYBRID MOVIE RECOMMENDER SYSTEM (hybrid_recommender.py)")
     print("            TARUMT - Artificial Intelligence Project")
     print("=" * 78)
     

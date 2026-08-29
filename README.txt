@@ -20,7 +20,7 @@ The app has two views:
 PROJECT FILES
 ----------------------------------------------------------------------------------------
   app.py                        - Main Streamlit web application (entry point)
-  module_hybrid.py              - Hybrid recommender engine & evaluation logic
+  hybrid_recommender.py         - Hybrid recommender engine & evaluation logic
   collaborative_recommender.py  - Collaborative Filtering (CF) engine
   content_based_recommender.py  - Content-Based Filtering (CBF) engine
   movies_dataset.csv            - MovieLens dataset (required, ~79 MB)
@@ -98,7 +98,7 @@ ports directly. Follow these steps:
    - movies_dataset.csv
    - survey_responses.csv
    - app.py
-   - module_hybrid.py
+   - hybrid_recommender.py
    - collaborative_recommender.py
    - content_based_recommender.py
 

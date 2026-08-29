@@ -19,7 +19,8 @@ Description:
 import streamlit as st
 import pandas as pd
 import numpy as np
-import module_hybrid
+import altair as alt
+import hybrid_recommender
 import collaborative_recommender
 import content_based_recommender
 
@@ -310,15 +311,15 @@ def dev_login_dialog():
 # ======================================================================================
 @st.cache_data(show_spinner="Loading MovieLens Dataset...")
 def get_cached_dataset():
-    return module_hybrid.load_dataset('movies_dataset.csv')
+    return hybrid_recommender.load_dataset('movies_dataset.csv')
 
 @st.cache_resource(show_spinner="Building Hybrid TF-IDF & Matrix Structures...")
 def get_cached_structures(data):
-    return module_hybrid.build_engine_structures(data)
+    return hybrid_recommender.build_engine_structures(data)
 
 @st.cache_data(show_spinner="Running 80/20 Mock Test Evaluation across 3 Hybrid Configurations...")
 def get_cached_evaluation(data):
-    metrics_df, details = module_hybrid.evaluate_hybrid_recommender_system(data)
+    metrics_df, details = hybrid_recommender.evaluate_hybrid_recommender_system(data)
     return metrics_df, details
 
 @st.cache_data(show_spinner="Running 80/20 Train-Test Evaluation for Collaborative Filtering...")
@@ -423,7 +424,7 @@ if st.session_state.view_mode == "user":
             st.write("")
             search_trigger = st.button("Search Catalog", use_container_width=True)
             
-        candidate_matches = module_hybrid.search_movies(search_query, structures['movie_stats'], max_results=8)
+        candidate_matches = hybrid_recommender.search_movies(search_query, structures['movie_stats'], max_results=8)
         
         if not candidate_matches:
             st.warning(f"No movies found matching title '{search_query}'. Please check spelling or try another title.")
@@ -459,7 +460,7 @@ if st.session_state.view_mode == "user":
             
             # Generate Hybrid Recommendations
             with st.spinner("Generating Hybrid Recommendations..."):
-                recs, err = module_hybrid.get_hybrid_recommendations(
+                recs, err = hybrid_recommender.get_hybrid_recommendations(
                     selected_movie,
                     structures,
                     alpha=st.session_state.alpha,
@@ -549,7 +550,7 @@ if st.session_state.view_mode == "user":
             submit_btn = st.form_submit_button("Submit Evaluation", use_container_width=True)
             
             if submit_btn:
-                module_hybrid.save_survey_response(eval_name, q_rel, q_nov, q_div, q_ui, q_overall, q_comments)
+                hybrid_recommender.save_survey_response(eval_name, q_rel, q_nov, q_div, q_ui, q_overall, q_comments)
                 st.success("Thank you! Your evaluation has been recorded successfully.")
 
 
@@ -1033,7 +1034,7 @@ where:
         st.markdown("### User Satisfaction Questionnaire Analytics & Audit")
         st.write("Detailed administrative inspection of user evaluations, respondent identities, and dimension distributions.")
         
-        survey_df = module_hybrid.load_survey_responses()
+        survey_df = hybrid_recommender.load_survey_responses()
         
         if not survey_df.empty:
             avg_rel = survey_df['Relevance (1-5)'].mean()
@@ -1066,10 +1067,15 @@ where:
                 st.markdown("#### Average Score by Dimension")
                 dimension_means = pd.DataFrame({
                     'Dimension': ['Relevance', 'Novelty', 'Diversity', 'UI Usability', 'Overall'],
-                    'Average Score (out of 5.0)': [avg_rel, avg_nov, avg_div, avg_ui, avg_overall]
-                }).set_index('Dimension')
+                    'Score': [avg_rel, avg_nov, avg_div, avg_ui, avg_overall]
+                })
                 
-                st.bar_chart(dimension_means)
+                dim_chart = alt.Chart(dimension_means).mark_bar(color='#6366F1', cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+                    x=alt.X('Dimension:N', sort=None, title='Dimension'),
+                    y=alt.Y('Score:Q', scale=alt.Scale(domain=[0, 5]), title='Average Score (out of 5.0)'),
+                    tooltip=['Dimension', alt.Tooltip('Score:Q', format='.2f', title='Avg Score')]
+                ).properties(height=300)
+                st.altair_chart(dim_chart, use_container_width=True)
                 
             with col_dev_summary:
                 st.markdown("#### Questionnaire Summary")
