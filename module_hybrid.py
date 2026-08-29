@@ -22,9 +22,6 @@ Offline Evaluation:
 
 import os
 import sys
-import re
-import ast
-import difflib
 import warnings
 from math import sqrt
 from datetime import datetime
