@@ -15,7 +15,7 @@ Offline Evaluation:
       1. Hybrid 20% CF / 80% CBF
       2. Hybrid 50% CF / 50% CBF
       3. Hybrid 80% CF / 20% CBF
-    Measuring Rating Prediction Errors (MSE, RMSE, MAE) and Top-10 Ranking Metrics
+    Measuring Rating Prediction Errors (MSE, RMSE) and Top-10 Ranking Metrics
     (Precision@10, Recall@10, F1-Score@10, and Avg Hits in Top-10 from the 20% test set).
 ========================================================================================
 """
@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import linear_kernel, cosine_similarity
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.metrics import mean_squared_error
 
 # Import algorithm modules
 import collaborative_recommender as cf_engine
@@ -344,7 +344,7 @@ def evaluate_hybrid_recommender_system(data=None, test_size=0.2, random_state=42
       3. Hybrid 80% CF / 20% CBF (Weights: 0.8 CF, 0.2 CBF)
       
     Calculates for each configuration:
-      - Rating Prediction Errors (MSE, RMSE, MAE) on the 20% mock test ratings
+      - Rating Prediction Errors (MSE, RMSE) on the 20% mock test ratings
       - Top-10 Mock Test Recommendation Ranking Metrics (Precision@10, Recall@10, F1-Score@10)
       - How many separate 20% mock test movies were chosen in the top 10 (Avg Hits in Top-10).
     """
@@ -447,7 +447,6 @@ def evaluate_hybrid_recommender_system(data=None, test_size=0.2, random_state=42
         pred_hybrid = np.clip((w_cf * pred_cf_test) + (w_cb * pred_cb_test), 0.5, 5.0)
         mse = mean_squared_error(actual_test_ratings, pred_hybrid)
         rmse = sqrt(mse)
-        mae = mean_absolute_error(actual_test_ratings, pred_hybrid)
         
         # B. Top-10 Recommendation Quality on 20% mock test ground-truth
         precisions, recalls, f1s = [], [], []
@@ -474,7 +473,6 @@ def evaluate_hybrid_recommender_system(data=None, test_size=0.2, random_state=42
             'Model Configuration': name,
             'MSE': round(float(mse), 4),
             'RMSE': round(float(rmse), 4),
-            'MAE': round(float(mae), 4),
             'Precision@10': round(mean_precision, 4),
             'Recall@10': round(mean_recall, 4),
             'F1-Score@10': round(mean_f1, 4)
@@ -515,7 +513,7 @@ def display_cli_evaluation_matrix(data=None):
     
     # Format table for clean ASCII display
     headers = [
-        "Model Configuration", "MSE", "RMSE", "MAE", 
+        "Model Configuration", "MSE", "RMSE",
         f"Precision@{details['top_k']}", f"Recall@{details['top_k']}", 
         f"F1@{details['top_k']}"
     ]
@@ -526,13 +524,12 @@ def display_cli_evaluation_matrix(data=None):
             r['Model Configuration'],
             f"{r['MSE']:.4f}",
             f"{r['RMSE']:.4f}",
-            f"{r['MAE']:.4f}",
             f"{r['Precision@10']:.4f}",
             f"{r['Recall@10']:.4f}",
             f"{r['F1-Score@10']:.4f}"
         ])
         
-    cf_engine.print_ascii_table(headers, rows, alignments=['left', 'center', 'center', 'center', 'center', 'center', 'center'])
+    cf_engine.print_ascii_table(headers, rows, alignments=['left', 'center', 'center', 'center', 'center', 'center'])
     print("=" * 90 + "\n")
     return metrics_df
 

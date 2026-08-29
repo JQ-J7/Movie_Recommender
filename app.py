@@ -27,7 +27,7 @@ import content_based_recommender
 # 1. PAGE CONFIGURATION & HIGH-END ACADEMIC THEME
 # ======================================================================================
 st.set_page_config(
-    page_title="CineMatch AI | Hybrid Recommender System",
+    page_title="Hybrid Recommender System",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -380,14 +380,14 @@ with col_nav_right:
 if st.session_state.view_mode == "user":
     st.markdown("""
     <div class="main-header">
-        <h1>CineMatch AI | Hybrid Movie Recommender</h1>
+        <h1>Hybrid Movie Recommender</h1>
         <p>Discover personalized film recommendations powered by integrated Content-Based Semantics and Collaborative Filtering.</p>
     </div>
     """, unsafe_allow_html=True)
 else:
     st.markdown("""
     <div class="dev-header">
-        <h1>CineMatch AI | Developer & Evaluation Studio</h1>
+        <h1>Developer & Evaluation Studio</h1>
         <p>System Calibration, Alpha Weighting Hyperparameters, 80/20 Offline Benchmark Metrics, and Survey Auditing.</p>
     </div>
     """, unsafe_allow_html=True)
@@ -676,7 +676,7 @@ where:
         st.write(
             "Rigorous offline validation partitioning the dataset into an **80% training set** and a **20% separate mock test set**. "
             "Evaluates **Precision@10**, **Recall@10**, **F1-Score@10** (in decimals), "
-            "and Rating Prediction Errors (**MSE**, **RMSE**, **MAE**) across **3 Hybrid Configurations**."
+            "and Rating Prediction Errors (**MSE**, **RMSE**) across **3 Hybrid Configurations**."
         )
         
         col_btn_eval, col_info_eval = st.columns([1.2, 3])
@@ -729,7 +729,7 @@ where:
         st.write("Comparison of the 3 specified Hybrid configurations combining Collaborative Filtering (CF) and Content-Based Filtering (CBF):")
         
         formatted_table = metrics_df.copy()
-        for col in ['MSE', 'RMSE', 'MAE', 'Precision@10', 'Recall@10', 'F1-Score@10']:
+        for col in ['MSE', 'RMSE', 'Precision@10', 'Recall@10', 'F1-Score@10']:
             if col in formatted_table.columns:
                 formatted_table[col] = formatted_table[col].apply(lambda v: f"{v:.4f}")
         
@@ -749,8 +749,8 @@ where:
             st.caption("Higher decimal values indicate superior Top-10 recommendation ranking relevance.")
             
         with col_chart2:
-            st.markdown("##### Rating Prediction Errors (RMSE, MAE & MSE)")
-            chart_error = metrics_df.set_index('Model Configuration')[['RMSE', 'MAE', 'MSE']]
+            st.markdown("##### Rating Prediction Errors (RMSE & MSE)")
+            chart_error = metrics_df.set_index('Model Configuration')[['RMSE', 'MSE']]
             st.bar_chart(chart_error)
             st.caption("Lower error values indicate better rating prediction precision.")
             
