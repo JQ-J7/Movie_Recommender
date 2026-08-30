@@ -1,25 +1,3 @@
-"""
-========================================================================================
-             TARUMT - ARTIFICIAL INTELLIGENCE (AI) GROUP PROJECT
-                    Module: Hybrid Recommender System
-========================================================================================
-Description:
-    State-of-the-Art Hybrid Recommender System Engine integrating:
-    1. Collaborative Filtering (CF) from collaborative_recommender.py
-       (Pearson Correlation & User-Item Interaction Matrix)
-    2. Content-Based Filtering (CBF) from content_based_recommender.py
-       (TF-IDF Vectorization & Cosine Similarity on Genres, Keywords, Cast, Director, Synopsis)
-
-Offline Evaluation:
-    Evaluates 80% Train / 20% Mock Test partition across 3 Hybrid models:
-      1. Hybrid 20% CF / 80% CBF
-      2. Hybrid 50% CF / 50% CBF
-      3. Hybrid 80% CF / 20% CBF
-    Measuring Rating Prediction Errors (MSE, RMSE) and Top-10 Ranking Metrics
-    (Precision@10, Recall@10, F1-Score@10, and Avg Hits in Top-10 from the 20% test set).
-========================================================================================
-"""
-
 import os
 import sys
 import warnings
@@ -42,9 +20,7 @@ DATASET_FILE = 'movies_dataset.csv'
 SURVEY_FILE = 'survey_responses.csv'
 
 
-# ======================================================================================
 # 1. DATA LOADING & UNIFIED PREPROCESSING MODULE
-# ======================================================================================
 
 def load_dataset(dataset_file=DATASET_FILE):
     """
@@ -113,9 +89,8 @@ def build_engine_structures(data=None):
     }
 
 
-# ======================================================================================
+
 # 2. SMART SEARCH MODULE
-# ======================================================================================
 
 def normalize_title_query(query):
     """
@@ -132,9 +107,7 @@ def search_movies(query, movie_stats, max_results=10):
     return cbf_engine.search_movies(query, titles_list, movie_stats, max_results=max_results)
 
 
-# ======================================================================================
 # 3. CORE HYBRID RECOMMENDER ENGINE (CF & CBF INTEGRATION)
-# ======================================================================================
 
 def compute_content_similarity(target_title, structures):
     """
@@ -329,9 +302,7 @@ def get_user_personalized_recommendations(user_id, structures, raw_data=None, al
     return top_results, None
 
 
-# ======================================================================================
 # 4. COMPREHENSIVE 80/20 MOCK TEST EVALUATION MODULE
-# ======================================================================================
 
 def evaluate_hybrid_recommender_system(data=None, test_size=0.2, random_state=42, relevance_threshold=3.5, top_k=10, max_eval_users=200):
     """
@@ -547,9 +518,7 @@ def evaluate_hybrid_recommender(data=None, test_size=0.2, random_state=42, relev
     return metrics_df, details
 
 
-# ======================================================================================
 # 5. USER SATISFACTION QUESTIONNAIRE MODULE
-# ======================================================================================
 
 def save_survey_response(user_name="Anonymous", relevance=5, novelty=4, diversity=4, ui_ease=5, overall=5.0, feedback=""):
     """
@@ -591,9 +560,7 @@ def load_survey_responses():
     return pd.read_csv(SURVEY_FILE)
 
 
-# ======================================================================================
 # 6. CLI INTERACTIVE CONSOLE APPLICATION
-# ======================================================================================
 
 def cli_movie_search_mode(structures):
     """Interactive movie-to-movie search and recommendation in terminal."""

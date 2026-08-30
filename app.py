@@ -1,21 +1,3 @@
-"""
-========================================================================================
-             TARUMT - ARTIFICIAL INTELLIGENCE (AI) GROUP PROJECT
-        Option 3: Hybrid Movie Recommender System - Interactive Studio
-========================================================================================
-Description:
-    Streamlit Web Application for Hybrid Movie Recommendations.
-    Architecture:
-      1. Dual View Architecture (No Sidebar):
-         - User View: Pure Movie-to-Movie Discovery (Title search) & User Satisfaction
-           Questionnaire submission.
-         - Developer View: Password-Protected (PIN: 1234). Hyperparameter Tuning (Alpha Weighting),
-           80/20 Offline Evaluation Metrics, and Full Survey Analytics & Respondent Auditing.
-      2. High-Performance Hybrid Recommender Engine (TF-IDF Semantics + Collaborative Correlation).
-      3. Enterprise-grade UI design with zero emojis for an academic, professional aesthetic.
-========================================================================================
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
