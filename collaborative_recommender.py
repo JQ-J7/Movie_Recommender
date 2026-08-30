@@ -1,22 +1,3 @@
-"""
-========================================================================================
-             TARUMT - ARTIFICIAL INTELLIGENCE (AI) GROUP PROJECT
-           Option 3: Collaborative Filtering Movie Recommender System
-========================================================================================
-Description:
-    An end-to-end Item-Based Collaborative Filtering Recommender System.
-    Provides intelligent search-based recommendations, dataset analytics, and 
-    comprehensive model evaluation (RMSE, MSE, MAE, Precision, Recall, F1-Score).
-
-Key Capabilities:
-    1. Dedicated Movie Search Engine (Instant lookup of Title, Genres, Ratings & Plot).
-    2. Fast Item-Based Collaborative Filtering (Pearson Correlation Matrix).
-    3. Comprehensive Model Evaluation (80/20 Train-Test split for RMSE, MSE & Precision/Recall/F1).
-    4. Dataset Explorer & Sparsity Analysis.
-    5. Clean Interactive Console User Interface.
-========================================================================================
-"""
-
 import os
 import re
 import difflib
@@ -27,16 +8,12 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-# Suppress runtime warnings from sparse correlation calculations
+# ignore runtime warnings
 warnings.filterwarnings('ignore')
 
 
-# ======================================================================================
-# 1. DATA LOADING MODULE
-# ======================================================================================
-
+# extract names from json-like strings or list of dicts
 def fast_extract_names(val):
-    """Fast extraction of 'name' fields from JSON/dict formatted strings."""
     if not isinstance(val, str) or not val:
         return ''
     if val.startswith('['):
@@ -46,21 +23,18 @@ def fast_extract_names(val):
     return val
 
 
+# load dataset and clean metadata columns
 def load_dataset(dataset_file='movies_dataset.csv'):
-    """
-    Loads the MovieLens dataset ('merged_movies_ratings.csv').
-    Parses genres, keywords, and overview metadata for rich search and recommendation.
-    """
     try:
         if not os.path.exists(dataset_file):
-            print(f"[!] Error: Dataset file '{dataset_file}' not found.")
-            print(f"    Please ensure '{dataset_file}' exists in the current directory.")
+            print(f"Error: Dataset file '{dataset_file}' not found.")
+            print(f"Please make sure '{dataset_file}' is in the current directory.")
             return None
             
-        print(f"[+] Loading dataset from '{dataset_file}'...")
+        print(f"Loading dataset from '{dataset_file}'...")
         data = pd.read_csv(dataset_file)
         
-        # Clean and parse metadata fields
+        # clean text fields
         if 'genres' in data.columns:
             data['genres_clean'] = data['genres'].apply(fast_extract_names)
         else:
@@ -77,21 +51,19 @@ def load_dataset(dataset_file='movies_dataset.csv'):
         else:
             data['overview_clean'] = ''
             
-        print(f"[+] Successfully loaded {len(data):,} ratings across {data['movieId'].nunique():,} unique movies.\n")
+        print(f"Loaded {len(data):,} ratings across {data['movieId'].nunique():,} unique movies.\n")
         return data
         
     except Exception as e:
-        print(f"[!] Error loading dataset: {e}")
+        print(f"Error loading dataset: {e}")
         return None
 
 
+# build user-item matrix and calculate movie stats
 def build_recommender_matrix(data):
-    """
-    Builds the User-Item rating matrix (Pivot Table) and computes aggregate movie statistics.
-    """
-    print("[*] Building User-Item Interaction Matrix & Movie Statistics...")
+    print("Building user-item matrix and movie statistics...")
     
-    # Calculate movie-level statistics
+    # calculate movie stats
     movie_stats = data.groupby('title').agg(
         avg_rating=('rating', 'mean'),
         num_of_ratings=('rating', 'count'),
@@ -101,23 +73,16 @@ def build_recommender_matrix(data):
         movieId=('movieId', 'first')
     ).reset_index()
     
-    # Create the User-Item matrix (rows = userId, columns = title)
+    # pivot table: users as rows, movies as columns
     user_movie_matrix = data.pivot_table(index='userId', columns='title', values='rating', aggfunc='mean')
     
     num_users, num_movies = user_movie_matrix.shape
-    print(f"[+] User-Item Matrix ready: {num_users} users x {num_movies} movies.\n")
+    print(f"User-Item Matrix shape: {num_users} users x {num_movies} movies.\n")
     return user_movie_matrix, movie_stats
 
 
-# ======================================================================================
-# 2. INTELLIGENT ALL-SEARCH & QUERY MATCHING MODULE
-# ======================================================================================
-
+# handle common movie prefixes like 'The', 'A', 'An'
 def normalize_title_query(query):
-    """
-    Generates variations for queries with leading articles.
-    Example: 'Matrix' -> ['Matrix', 'The Matrix', 'Matrix, The']
-    """
     query_clean = query.strip()
     variants = [query_clean]
     for article in ['The ', 'A ', 'An ']:
@@ -129,19 +94,14 @@ def normalize_title_query(query):
     return variants
 
 
+# search movies by title, keywords, genres, and overview
 def search_movies(query, titles_list, movie_stats, max_results=5):
-    """
-    Multi-attribute all-search engine:
-    1. Exact case-insensitive match on Title (with or without release year).
-    2. Combined candidate scoring across Titles, Keywords/Tags, Genres, and Overview.
-    3. Fuzzy string similarity fallback.
-    """
     query_clean = query.strip()
     query_lower = query_clean.lower()
     query_variants = normalize_title_query(query_clean)
     stats_map = dict(zip(movie_stats['title'], movie_stats['num_of_ratings']))
     
-    # 1. Exact match on title variants
+    # 1. exact match on title variants
     for var in query_variants:
         var_lower = var.lower()
         for title in titles_list:
@@ -151,10 +111,10 @@ def search_movies(query, titles_list, movie_stats, max_results=5):
             if clean_title == var_lower:
                 return [title]
                 
-    # 2. Gather candidates from Title, Keywords, Genres, and Overview
+    # 2. search across title, keywords, genres, and overview
     scored_candidates = {}
     
-    # Title substring matches (highest weight: 1000 + popularity)
+    # title substring match
     for var in query_variants:
         var_lower = var.lower()
         for title in titles_list:
@@ -162,7 +122,7 @@ def search_movies(query, titles_list, movie_stats, max_results=5):
                 pop = stats_map.get(title, 0)
                 scored_candidates[title] = max(scored_candidates.get(title, 0), 1000 + pop)
                 
-    # Keywords / Tags matches (weight: 500 + popularity)
+    # keyword match
     if 'keywords' in movie_stats.columns:
         kw_matches = movie_stats[movie_stats['keywords'].str.contains(query_clean, case=False, na=False, regex=False)]
         for _, row in kw_matches.iterrows():
@@ -170,14 +130,14 @@ def search_movies(query, titles_list, movie_stats, max_results=5):
             pop = row['num_of_ratings']
             scored_candidates[t] = max(scored_candidates.get(t, 0), 500 + pop)
             
-    # Genre matches (weight: 200 + popularity)
+    # genre match
     genre_matches = movie_stats[movie_stats['genres'].str.contains(query_clean, case=False, na=False, regex=False)]
     for _, row in genre_matches.iterrows():
         t = row['title']
         pop = row['num_of_ratings']
         scored_candidates[t] = max(scored_candidates.get(t, 0), 200 + pop)
         
-    # Overview keyword matches (weight: 100 + popularity)
+    # overview match
     if 'overview' in movie_stats.columns:
         ov_matches = movie_stats[movie_stats['overview'].str.contains(r'\b' + re.escape(query_clean) + r'\b', case=False, na=False, regex=True)]
         for _, row in ov_matches.head(10).iterrows():
@@ -189,21 +149,13 @@ def search_movies(query, titles_list, movie_stats, max_results=5):
         sorted_candidates = sorted(scored_candidates.keys(), key=lambda t: scored_candidates[t], reverse=True)
         return sorted_candidates[:max_results]
         
-    # 3. Fuzzy similarity fallback
+    # 3. fuzzy search fallback
     fuzzy_matches = difflib.get_close_matches(query_clean, titles_list, n=max_results, cutoff=0.4)
     return fuzzy_matches
 
 
-# ======================================================================================
-# 3. ITEM-BASED COLLABORATIVE FILTERING RECOMMENDER ENGINE
-# ======================================================================================
-
+# item-based collaborative filtering recommender class
 class CollaborativeRecommender:
-    """
-    Item-Based Collaborative Filtering Recommender Engine using Pearson Correlation.
-    Supports model fitting, movie-to-movie similarity scoring, hybrid score generation,
-    catalog searching, and system evaluation.
-    """
     def __init__(self, min_ratings=50, min_overlap=15):
         self.min_ratings = min_ratings
         self.min_overlap = min_overlap
@@ -212,21 +164,16 @@ class CollaborativeRecommender:
         self.movie_stats = None
         self.titles_list = []
 
+    # fit model on dataset
     def fit(self, data):
-        """
-        Builds the User-Item rating matrix and movie statistics from dataset.
-        """
         self.data = data
         self.user_movie_matrix, self.movie_stats = build_recommender_matrix(data)
         if self.movie_stats is not None and 'title' in self.movie_stats.columns:
             self.titles_list = self.movie_stats['title'].tolist()
         return self
 
+    # calculate pearson correlation scores for hybrid model
     def compute_similarity_scores(self, target_title, min_overlap=None):
-        """
-        Computes normalized Pearson similarity scores [0.0, 1.0] for a target movie
-        against all catalog movies. (Designed specifically for Hybrid Fusion).
-        """
         if min_overlap is None:
             min_overlap = self.min_overlap
 
@@ -242,7 +189,7 @@ class CollaborativeRecommender:
         target_ratings = self.user_movie_matrix[target_title]
         target_mask = target_ratings.notna()
 
-        # Filter candidates by minimum ratings for speed and statistical significance
+        # filter candidates by minimum rating count for speed
         candidate_titles = self.movie_stats[self.movie_stats['num_of_ratings'] >= min(5, self.min_ratings)]['title']
         candidate_cols = [c for c in candidate_titles if c in self.user_movie_matrix.columns]
         candidate_matrix = self.user_movie_matrix[candidate_cols]
@@ -259,7 +206,7 @@ class CollaborativeRecommender:
                 if len(np.unique(x)) > 1 and len(np.unique(y)) > 1:
                     r = np.corrcoef(x, y)[0, 1]
                     if not np.isnan(r):
-                        # Normalize Pearson r from [-1, 1] to [0, 1]
+                        # scale pearson r from [-1, 1] to [0, 1]
                         corrs[col] = (r + 1.0) / 2.0
 
         for col, score in corrs.items():
@@ -268,10 +215,8 @@ class CollaborativeRecommender:
 
         return cf_scores
 
+    # get top n recommendations for a movie
     def get_similar_movies(self, movie_title, top_n=10, min_ratings=None, min_overlap=None):
-        """
-        Generates top-N movie recommendations using Item-Based Collaborative Filtering.
-        """
         m_ratings = min_ratings if min_ratings is not None else self.min_ratings
         m_overlap = min_overlap if min_overlap is not None else self.min_overlap
         return get_collaborative_recommendations(
@@ -283,20 +228,16 @@ class CollaborativeRecommender:
             top_n=top_n
         )
 
+    # search catalog
     def search(self, query, max_results=5):
-        """
-        Searches movies matching query in catalog.
-        """
         if self.movie_stats is None:
             return []
         return search_movies(query, self.titles_list, self.movie_stats, max_results=max_results)
 
+    # run offline evaluation with 80/20 train-test split
     def evaluate(self, test_size=0.2, random_state=42, relevance_threshold=3.5, top_k=10):
-        """
-        Runs offline evaluation using 80/20 train-test split.
-        """
         if self.data is None:
-            print("[!] Model must be fitted with dataset before running evaluation.")
+            print("Model must be fitted with dataset before running evaluation.")
             return None
         return evaluate_recommender_system(
             self.data,
@@ -307,25 +248,15 @@ class CollaborativeRecommender:
         )
 
 
+# calculate item-item pearson correlation recommendations
 def get_collaborative_recommendations(movie_title, user_movie_matrix, movie_stats, min_ratings=50, min_overlap=15, top_n=10):
-    """
-    Generates movie recommendations using Item-Based Collaborative Filtering (Pearson Correlation).
-    
-    Parameters:
-        movie_title (str): The exact target movie title.
-        user_movie_matrix (pd.DataFrame): The User-Item rating matrix.
-        movie_stats (pd.DataFrame): Summary statistics per movie.
-        min_ratings (int): Minimum total ratings a candidate movie must have.
-        min_overlap (int): Minimum co-rated users required between target and candidate.
-        top_n (int): Number of recommendations to return.
-    """
     if movie_title not in user_movie_matrix.columns:
         return None
         
     target_ratings = user_movie_matrix[movie_title]
     target_non_null = target_ratings.notna()
     
-    # Filter candidates by minimum total ratings for speed and statistical significance
+    # filter movies with at least min_ratings
     popular_titles = movie_stats[movie_stats['num_of_ratings'] >= min_ratings]['title']
     if movie_title not in popular_titles.values:
         popular_titles = pd.concat([popular_titles, pd.Series([movie_title])])
@@ -359,21 +290,15 @@ def get_collaborative_recommendations(movie_title, user_movie_matrix, movie_stat
     results['avg_rating'] = results['avg_rating'].round(2)
     results['Correlation'] = results['Correlation'].round(4)
     
-    # Sort primarily by correlation, secondarily by total rating count
+    # sort by correlation score and rating count
     recommendations = results.sort_values(by=['Correlation', 'num_of_ratings'], ascending=[False, False])
     
     output_cols = ['title', 'Correlation', 'avg_rating', 'num_of_ratings', 'Co-rated Users', 'genres']
     return recommendations[output_cols].head(top_n).reset_index(drop=True)
 
 
-# ======================================================================================
-# 4. TABLE FORMATTING UTILITIES (ASCII BOX BORDERS)
-# ======================================================================================
-
+# print table with borders
 def print_ascii_table(headers, rows, alignments=None):
-    """
-    Renders a formatted ASCII table with clean borders and column alignments.
-    """
     if not rows:
         return
         
@@ -412,12 +337,10 @@ def print_ascii_table(headers, rows, alignments=None):
     print(border_line)
 
 
+# print recommendations in formatted table
 def print_recommendations_table(df):
-    """
-    Renders an ASCII boxed table with clean border lines for movie recommendations.
-    """
     if df is None or df.empty:
-        print("[!] No recommendations found meeting the correlation threshold.")
+        print("No recommendations found meeting the correlation threshold.")
         return
         
     headers = ["#", "Movie Title", "Similarity", "Avg Rating", "Ratings", "Co-rated", "Genres"]
@@ -442,31 +365,23 @@ def print_recommendations_table(df):
     print_ascii_table(headers, rows, alignments=['center', 'left', 'center', 'center', 'right', 'right', 'left'])
 
 
-# ======================================================================================
-# 5. SYSTEM EVALUATION MODULE (RMSE, MSE, MAE, PRECISION, RECALL, F1)
-# ======================================================================================
-
+# evaluate rating error (MSE, RMSE) and top-k metrics (Precision, Recall, F1) on 80/20 split
 def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_threshold=3.5, top_k=10):
-    """
-    Evaluates the recommender system using an 80/20 Train-Test split based on assignment requirements:
-      1. Rating Prediction Error (MSE, RMSE, MAE) -> Assignment Requirement 3.d.ii
-      2. Top-10 Recommendation Evaluation (Precision@10, Recall@10, F1@10, Hits) -> Assignment Requirement 3.d.i
-    Returns a comprehensive metrics dictionary for programmatic and GUI access.
-    """
-    print("\n" + "="*75)
-    print("      [EVALUATION] RECOMMENDER SYSTEM ACCURACY (80/20 Train-Test Split)")
-    print("="*75)
+    print("\n" + "="*70)
+    print("      Evaluation: Collaborative Filtering (80/20 Train-Test Split)")
+    print("="*70)
     
+    # 80/20 split
     train_df, test_df = train_test_split(data, test_size=test_size, random_state=random_state)
-    print(f"[*] Training Ratings (80%) : {len(train_df):,} ratings (Model Training)")
-    print(f"[*] Testing Ratings  (20%) : {len(test_df):,} ratings (Mock Test Ground Truth)")
-    print(f"[*] Relevance Threshold    : Rating >= {relevance_threshold:.1f} stars\n")
+    print(f"Training set: {len(train_df):,} ratings (80%)")
+    print(f"Testing set : {len(test_df):,} ratings (20%)")
+    print(f"Relevance threshold: >= {relevance_threshold:.1f} stars\n")
     
     global_mean = train_df['rating'].mean()
     movie_means = train_df.groupby('movieId')['rating'].mean().to_dict()
     user_means = train_df.groupby('userId')['rating'].mean().to_dict()
     
-    # 1. Rating Prediction Error (Collaborative Baseline)
+    # 1. rating prediction error using baseline predictor
     pred_combined = [
         np.clip(user_means.get(u, global_mean) + movie_means.get(m, global_mean) - global_mean, 0.5, 5.0)
         for u, m in zip(test_df['userId'], test_df['movieId'])
@@ -474,7 +389,7 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     mse = mean_squared_error(test_df['rating'], pred_combined)
     rmse = sqrt(mse)
     
-    # 2. Top-10 Recommendation Accuracy on 20% Mock Test Set
+    # 2. top-10 recommendation metrics on test set
     train_user_movies = train_df.groupby('userId')['movieId'].apply(set).to_dict()
     test_user_relevant = test_df[test_df['rating'] >= relevance_threshold].groupby('userId')['movieId'].apply(set).to_dict()
     
@@ -483,6 +398,7 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
         avg_rating=('rating', 'mean')
     ).reset_index()
     
+    # weighted rating formula for ranking
     m_threshold = 50
     v_pop = movie_pop_stats['num_ratings']
     R_pop = movie_pop_stats['avg_rating']
@@ -507,8 +423,8 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     mean_f1 = float((2 * mean_prec * mean_rec) / (mean_prec + mean_rec)) if (mean_prec + mean_rec) > 0 else 0.0
     avg_hits = float(np.mean(total_hits)) if total_hits else 0.0
     
-    # Output Table 1: Rating Prediction Error
-    print("--- [1] Rating Prediction Error ---")
+    # print prediction error table
+    print("--- Rating Prediction Error ---")
     headers_1 = ["Error Metric", "Score Value", "Percentage"]
     rows_1 = [
         ["Mean Squared Error (MSE)", f"{mse:.4f}", f"{(mse / 5.0)*100:.2f}%"],
@@ -516,8 +432,8 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     ]
     print_ascii_table(headers_1, rows_1, alignments=['left', 'center', 'center'])
     
-    # Output Table 2: Top-10 Recommendation Quality
-    print(f"\n--- [2] Top-{top_k} Recommendation Quality (20% Mock Test) ---")
+    # print ranking quality table
+    print(f"\n--- Top-{top_k} Recommendation Quality ---")
     headers_2 = [f"Top-{top_k} Metric", "Score Value", "Percentage"]
     rows_2 = [
         [f"Precision@{top_k}", f"{mean_prec:.4f}", f"{mean_prec*100:.2f}%"],
@@ -525,7 +441,7 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
         [f"F1-Score@{top_k}", f"{mean_f1:.4f}", f"{mean_f1*100:.2f}%"]
     ]
     print_ascii_table(headers_2, rows_2, alignments=['left', 'center', 'center'])
-    print("="*75 + "\n")
+    print("="*70 + "\n")
     
     error_table = pd.DataFrame([
         {"Metric": "Mean Squared Error (MSE)", "Score Value": f"{mse:.4f}", "Scale Percentage": f"{(mse / 5.0)*100:.2f}%", "Description": "Variance of prediction errors across test ratings"},
@@ -557,14 +473,8 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     }
 
 
-# ======================================================================================
-# 6. DATASET SUMMARY & ANALYTICS MODULE
-# ======================================================================================
-
+# compute dataset statistics and matrix sparsity
 def get_dataset_summary_metrics(data):
-    """
-    Computes comprehensive statistics and dataset properties.
-    """
     num_ratings = len(data)
     num_users = data['userId'].nunique()
     num_movies = data['movieId'].nunique() if 'movieId' in data.columns else data['title'].nunique()
@@ -582,38 +492,30 @@ def get_dataset_summary_metrics(data):
     }
 
 
+# print dataset summary in console
 def display_dataset_summary(data):
-    """
-    Displays comprehensive statistics and dataset properties in CLI.
-    """
-    print("\n" + "="*75)
-    print("              [ANALYTICS] DATASET SUMMARY & EXPLORATORY METRICS")
-    print("="*75)
+    print("\n" + "="*70)
+    print("                 Dataset Summary & Statistics")
+    print("="*70)
     
     stats = get_dataset_summary_metrics(data)
     
-    print(f"Total User Ratings   : {stats['num_ratings']:,}")
-    print(f"Unique Users         : {stats['num_users']:,}")
-    print(f"Unique Movies        : {stats['num_movies']:,}")
-    print(f"Rating Scale         : {data['rating'].min()} to {data['rating'].max()} stars")
-    print(f"Average Rating       : {stats['global_mean']:.2f} stars")
-    print(f"Rating Matrix Size   : {stats['num_users']} x {stats['num_movies']} ({stats['total_possible']:,} cells)")
-    print(f"Matrix Sparsity      : {stats['sparsity']:.2f}% (Standard in Recommender Systems)")
-    print("="*75 + "\n")
+    print(f"Total Ratings      : {stats['num_ratings']:,}")
+    print(f"Unique Users       : {stats['num_users']:,}")
+    print(f"Unique Movies      : {stats['num_movies']:,}")
+    print(f"Rating Range       : {data['rating'].min()} to {data['rating'].max()} stars")
+    print(f"Average Rating     : {stats['global_mean']:.2f} stars")
+    print(f"Matrix Dimensions  : {stats['num_users']} users x {stats['num_movies']} movies ({stats['total_possible']:,} cells)")
+    print(f"Matrix Sparsity    : {stats['sparsity']:.2f}%")
+    print("="*70 + "\n")
 
 
-# ======================================================================================
-# 6. INTERACTIVE CLI / MAIN APPLICATION LOOP
-# ======================================================================================
-
+# interactive search for movie details
 def interactive_movie_search_only(movie_stats):
-    """
-    Dedicated search mode: Looks up and displays complete movie details (Ratings, Genres, Keywords, Overview).
-    """
     titles_list = movie_stats['title'].tolist()
     
     while True:
-        print("\n" + "-"*75)
+        print("\n" + "-"*70)
         try:
             user_input = input("Enter movie title/keyword to lookup (or 'b' for main menu): ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -628,11 +530,11 @@ def interactive_movie_search_only(movie_stats):
         matches = search_movies(user_input, titles_list, movie_stats, max_results=5)
         
         if not matches:
-            print(f"\n[!] No movies found matching '{user_input}'.")
-            print("    Hint: Try typing a single keyword (e.g. 'Matrix', 'Star Wars', 'Avatar', 'Batman').")
+            print(f"No movies found matching '{user_input}'.")
+            print("Hint: Try a keyword like 'Matrix', 'Star Wars', 'Avatar', 'Batman'.")
             continue
             
-        # Movie Selection
+        # handle multiple matches
         if len(matches) == 1:
             target_movie = matches[0]
         else:
@@ -657,11 +559,11 @@ def interactive_movie_search_only(movie_stats):
             else:
                 target_movie = matches[0]
                 
-        # Display Movie Details
+        # display details
         movie_row = movie_stats[movie_stats['title'] == target_movie].iloc[0]
-        print("\n" + "="*75)
-        print("                            MOVIE DETAILS")
-        print("="*75)
+        print("\n" + "="*70)
+        print("                          Movie Details")
+        print("="*70)
         print(f"Title          : {movie_row['title']}")
         print(f"Movie ID       : {movie_row['movieId']}")
         print(f"Average Rating : {movie_row['avg_rating']:.2f} / 5.0 stars")
@@ -671,17 +573,15 @@ def interactive_movie_search_only(movie_stats):
             print(f"Keywords       : {movie_row['keywords'].replace('|', ' | ')}")
         if 'overview' in movie_row and movie_row['overview']:
             print(f"Overview       : {movie_row['overview']}")
-        print("="*75)
+        print("="*70)
 
 
+# interactive movie recommendation search
 def interactive_search_mode(user_movie_matrix, movie_stats):
-    """
-    Handles interactive user queries for movie recommendations.
-    """
     titles_list = movie_stats['title'].tolist()
     
     while True:
-        print("\n" + "-"*75)
+        print("\n" + "-"*70)
         try:
             user_input = input("Enter movie name/keyword (or 'b' for main menu): ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -696,11 +596,10 @@ def interactive_search_mode(user_movie_matrix, movie_stats):
         matches = search_movies(user_input, titles_list, movie_stats, max_results=5)
         
         if not matches:
-            print(f"\n[!] No movies found matching '{user_input}'.")
-            print("    Hint: Try typing a single keyword (e.g. 'Jedi', 'Matrix', 'Avatar', 'Batman').")
+            print(f"No movies found matching '{user_input}'.")
+            print("Hint: Try a keyword like 'Matrix', 'Avatar', 'Batman', 'Toy Story'.")
             continue
             
-        # Movie Selection
         if len(matches) == 1:
             target_movie = matches[0]
         else:
@@ -725,7 +624,6 @@ def interactive_search_mode(user_movie_matrix, movie_stats):
             else:
                 target_movie = matches[0]
                 
-        # Ask for number of recommendations to display
         try:
             num_recs_input = input("Enter number of recommendations to display [default 10]: ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -738,46 +636,46 @@ def interactive_search_mode(user_movie_matrix, movie_stats):
             
         top_n = int(num_recs_input) if num_recs_input.isdigit() and int(num_recs_input) > 0 else 10
         
-        print(f"\n[*] Generating collaborative recommendations for: '{target_movie}' (Top {top_n})...\n")
+        print(f"\nGenerating recommendations for: '{target_movie}' (Top {top_n})...\n")
         recs = get_collaborative_recommendations(target_movie, user_movie_matrix, movie_stats, min_ratings=50, top_n=top_n)
         
         if recs is None or recs.empty:
-            print("[!] No recommendations found meeting the correlation threshold.")
+            print("No recommendations found meeting the correlation threshold.")
         else:
-            print(">>> Top Recommendations:")
+            print("Top Recommendations:")
             print_recommendations_table(recs)
 
 
+# main console menu
 def main():
-    print("="*75)
-    print("     [RECOMMENDER SYSTEM] COLLABORATIVE FILTERING MOVIE RECOMMENDER")
-    print("                 TARUMT - Artificial Intelligence Project")
-    print("="*75 + "\n")
+    print("="*70)
+    print("          Collaborative Filtering Movie Recommender System")
+    print("="*70 + "\n")
     
-    # 1. Load Data
+    # 1. load data
     data = load_dataset()
     if data is None:
         return
         
-    # 2. Build User-Item Interaction Matrix
+    # 2. build matrix
     user_movie_matrix, movie_stats = build_recommender_matrix(data)
     
-    # 3. Main Console Menu Loop
+    # 3. main loop
     while True:
-        print("\n" + "="*50)
-        print("                 MAIN MENU")
-        print("="*50)
+        print("\n" + "="*45)
+        print("                  MAIN MENU")
+        print("="*45)
         print("  [1] Search Movie (View Details & Ratings)")
         print("  [2] Get Recommendations by Movie")
-        print("  [3] Run Recommender System Evaluation (RMSE/MSE/Precision/Recall/F1)")
+        print("  [3] Run Evaluation (RMSE/MSE/Precision/Recall/F1)")
         print("  [4] View Dataset Summary & Statistics")
-        print("  [5] Exit Application")
-        print("="*50)
+        print("  [5] Exit")
+        print("="*45)
         
         try:
             choice = input("Enter your option [1-5]: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nExiting Recommender System. Goodbye!")
+            print("\nExiting. Goodbye!")
             break
             
         if choice == '1':
@@ -792,7 +690,7 @@ def main():
             print("\nThank you for using the Recommender System. Goodbye!")
             break
         else:
-            print("[!] Invalid option. Please enter a number from 1 to 5.")
+            print("Invalid option. Please enter a number from 1 to 5.")
 
 
 if __name__ == "__main__":
