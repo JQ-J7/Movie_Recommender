@@ -23,11 +23,275 @@ st.markdown("""
     html, body, [class*="css"] {
         font-family: 'Outfit', 'Inter', sans-serif;
     }
+
+    /* Force consistent pure-black background everywhere */
+    html, body {
+        background-color: #000000 !important;
+    }
+
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+        background-color: #000000 !important;
+    }
+
+    [data-testid="stMain"], [data-testid="block-container"],
+    .main .block-container, section[data-testid="stMain"] > div {
+        background-color: #000000 !important;
+    }
+
+    /* Ensure bottom padding area is also black */
+    footer, [data-testid="stBottom"] {
+        background-color: #000000 !important;
+    }
+
+    /* ── Force all text to be light/white on black background ── */
+    /* General body text */
+    body, .stApp, [data-testid="stAppViewContainer"] {
+        color: #E2E8F0 !important;
+    }
+
+    /* Headings */
+    h1, h2, h3, h4, h5, h6 {
+        color: #F8FAFC !important;
+    }
+
+    /* Paragraphs and spans */
+    p, span, div {
+        color: inherit;
+    }
+
+    /* Streamlit markdown text */
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] li,
+    [data-testid="stMarkdownContainer"] span,
+    [data-testid="stMarkdownContainer"] strong,
+    [data-testid="stMarkdownContainer"] em {
+        color: #E2E8F0 !important;
+    }
+
+    /* st.write / st.text */
+    [data-testid="stText"] {
+        color: #E2E8F0 !important;
+    }
+
+    /* Tab labels */
+    [data-testid="stTabs"] button[role="tab"] {
+        color: #94A3B8 !important;
+    }
+    [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+        color: #FFFFFF !important;
+    }
+
+    /* Metric labels and values */
+    [data-testid="stMetricLabel"] p,
+    [data-testid="stMetricValue"] div {
+        color: #E2E8F0 !important;
+    }
+
+    /* Caption text */
+    [data-testid="stCaptionContainer"] p {
+        color: #94A3B8 !important;
+    }
     
     /* Completely hide Streamlit Sidebar and collapse toggle button */
     [data-testid="stSidebar"], [data-testid="collapsedControl"] {
         display: none !important;
     }
+
+    /* ── Dark Input Fields ── */
+    [data-testid="stTextInput"] input,
+    [data-testid="stTextInput"] textarea {
+        background-color: #111827 !important;
+        color: #F1F5F9 !important;
+        border: 1px solid rgba(99, 102, 241, 0.35) !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stTextInput"] input:focus,
+    [data-testid="stTextInput"] textarea:focus {
+        border-color: rgba(99, 102, 241, 0.75) !important;
+        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15) !important;
+    }
+
+    /* ── Dark Selectbox (closed state) ── */
+    [data-testid="stSelectbox"] > div > div,
+    [data-testid="stSelectbox"] > div > div > div {
+        background-color: #111827 !important;
+        color: #F1F5F9 !important;
+        border: 1px solid rgba(99, 102, 241, 0.35) !important;
+        border-radius: 8px !important;
+    }
+
+    /* ── Dropdown popup list (portal-rendered outside main DOM) ── */
+    /* Container / popover wrapper */
+    [data-baseweb="popover"],
+    [data-baseweb="popover"] > div,
+    [data-baseweb="select"] [role="listbox"],
+    ul[data-baseweb="menu"],
+    div[data-baseweb="menu"] {
+        background-color: #111827 !important;
+        border: 1px solid rgba(99, 102, 241, 0.35) !important;
+        border-radius: 8px !important;
+        color: #F1F5F9 !important;
+    }
+
+    /* Each option row */
+    [role="option"],
+    li[role="option"],
+    [data-baseweb="option"] {
+        background-color: #111827 !important;
+        color: #F1F5F9 !important;
+    }
+
+    /* Hover & selected option */
+    [role="option"]:hover,
+    li[role="option"]:hover,
+    [data-baseweb="option"]:hover {
+        background-color: rgba(99, 102, 241, 0.25) !important;
+        color: #FFFFFF !important;
+    }
+    [role="option"][aria-selected="true"],
+    [data-baseweb="option"][aria-selected="true"] {
+        background-color: rgba(99, 102, 241, 0.35) !important;
+        color: #FFFFFF !important;
+    }
+
+    /* ── Dark Buttons (stButton + stFormSubmitButton) ── */
+    [data-testid="stButton"] > button,
+    [data-testid="stFormSubmitButton"] > button,
+    .stButton > button,
+    .stFormSubmitButton > button {
+        background-color: #111827 !important;
+        color: #E0E7FF !important;
+        border: 1px solid rgba(99, 102, 241, 0.45) !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+    }
+    [data-testid="stButton"] > button:hover,
+    [data-testid="stFormSubmitButton"] > button:hover,
+    .stButton > button:hover,
+    .stFormSubmitButton > button:hover {
+        background-color: rgba(99, 102, 241, 0.18) !important;
+        border-color: rgba(99, 102, 241, 0.75) !important;
+        box-shadow: 0 0 10px rgba(99, 102, 241, 0.25) !important;
+        color: #FFFFFF !important;
+    }
+
+    /* ── Dark Dialog / Modal (st.dialog) ── */
+    [data-testid="stDialog"] > div,
+    [data-testid="stDialog"] [role="dialog"],
+    div[data-baseweb="dialog"],
+    div[data-baseweb="dialog"] > div {
+        background-color: #0F172A !important;
+        color: #E2E8F0 !important;
+        border: 1px solid rgba(99, 102, 241, 0.35) !important;
+        border-radius: 16px !important;
+        box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6) !important;
+    }
+
+    /* Dialog title */
+    [data-testid="stDialog"] h1,
+    [data-testid="stDialog"] h2,
+    [data-testid="stDialog"] h3,
+    div[data-baseweb="dialog"] h1,
+    div[data-baseweb="dialog"] h2 {
+        color: #F8FAFC !important;
+    }
+
+    /* Dialog body text */
+    [data-testid="stDialog"] p,
+    [data-testid="stDialog"] span,
+    div[data-baseweb="dialog"] p {
+        color: #CBD5E1 !important;
+    }
+
+    /* Dialog close (×) button */
+    [data-testid="stDialog"] button[aria-label="Close"],
+    div[data-baseweb="dialog"] button[aria-label="Close"] {
+        color: #94A3B8 !important;
+        background: transparent !important;
+        border: none !important;
+    }
+    [data-testid="stDialog"] button[aria-label="Close"]:hover {
+        color: #FFFFFF !important;
+    }
+
+    /* Modal backdrop */
+    [data-baseweb="block"] ~ div[role="presentation"],
+    div[data-baseweb="backdrop"] {
+        background-color: rgba(0, 0, 0, 0.75) !important;
+    }
+
+    /* ── Dark Text Area (Questionnaire form) ── */
+    [data-testid="stTextArea"] textarea {
+        background-color: #111827 !important;
+        color: #F1F5F9 !important;
+        border: 1px solid rgba(99, 102, 241, 0.35) !important;
+        border-radius: 8px !important;
+    }
+    [data-testid="stTextArea"] textarea:focus {
+        border-color: rgba(99, 102, 241, 0.75) !important;
+        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15) !important;
+    }
+
+    /* ── Label text colour ── */
+    [data-testid="stTextInput"] label,
+    [data-testid="stSelectbox"] label,
+    [data-testid="stTextArea"] label,
+    [data-testid="stSlider"] label {
+        color: #CBD5E1 !important;
+        font-size: 0.875rem !important;
+        font-weight: 500 !important;
+    }
+
+    /* ── Dark Code Block (st.code / Formula Reference) ── */
+    [data-testid="stCode"],
+    [data-testid="stCode"] pre,
+    [data-testid="stCode"] code,
+    .stCodeBlock,
+    .stCodeBlock pre {
+        background-color: #0D1117 !important;
+        color: #E2E8F0 !important;
+        border: 1px solid rgba(99, 102, 241, 0.25) !important;
+        border-radius: 8px !important;
+    }
+
+    /* ── Dataframe / Table — border only, let native dark theme render cells ── */
+    [data-testid="stDataFrame"] {
+        border-radius: 8px !important;
+        border: 1px solid rgba(99, 102, 241, 0.25) !important;
+        overflow: hidden !important;
+    }
+
+    /* ── Dark Altair / Bar Chart containers ── */
+    [data-testid="stArrowVegaLiteChart"],
+    [data-testid="stArrowVegaLiteChart"] > div,
+    [data-testid="stVegaLiteChart"],
+    .vega-embed,
+    .vega-embed svg,
+    .vega-embed canvas {
+        background-color: #000000 !important;
+        border-radius: 8px !important;
+    }
+    /* Vega chart background rect */
+    .vega-embed svg rect.background,
+    .marks rect.background {
+        fill: #000000 !important;
+    }
+
+    /* ── Dark Expander ── */
+    [data-testid="stExpander"],
+    [data-testid="stExpander"] > details,
+    [data-testid="stExpander"] > details > summary,
+    [data-testid="stExpander"] > details > div {
+        background-color: #0F172A !important;
+        border: 1px solid rgba(99, 102, 241, 0.25) !important;
+        border-radius: 8px !important;
+        color: #E2E8F0 !important;
+    }
+    [data-testid="stExpander"] summary:hover {
+        background-color: rgba(99, 102, 241, 0.08) !important;
+    }
+
     
     /* Top Bar Navigation Area */
     .top-bar-container {
