@@ -1,47 +1,22 @@
-"""
-========================================================================================
-             TARUMT - ARTIFICIAL INTELLIGENCE (AI) REPOSITORY
-         Content-Based Filtering (CBF) Movie Recommender System
-========================================================================================
-Description:
-    Content-Based Movie Recommender Engine using TF-IDF and Cosine Similarity
-    on metadata (genres, keywords, cast, director, and plot overview).
-
-Key Features:
-    1. Weighted Metadata Vectorization (TF-IDF & Cosine Similarity).
-    2. Intelligent Search Engine (Exact, Substring, Fuzzy & Article Normalization).
-    3. Top-10 Similar Movie Recommendations with Token-level Explainability.
-    4. Comprehensive Offline Evaluation (80/20 Split: MSE, RMSE, Precision@K, Recall@K, F1@K).
-    5. Interactive Console Interface & Metadata Analytics.
-========================================================================================
-"""
-
 import os
 import re
 import difflib
 import warnings
 from math import sqrt
-from datetime import datetime
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel, cosine_similarity
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.metrics import mean_squared_error
 
 # Suppress runtime warnings
 warnings.filterwarnings('ignore')
 
 
-# ======================================================================================
 # 1. METADATA PARSING & DATA PREPROCESSING MODULE
-# ======================================================================================
 
 def fast_extract_names(val):
-    """
-    Extracts 'name' values from JSON-like strings or pipe-delimited strings.
-    Example: "[{'id': 18, 'name': 'Drama'}, {'id': 80, 'name': 'Crime'}]" -> "Drama|Crime"
-    """
     if not isinstance(val, str) or not val:
         return ''
     if val.startswith('['):
@@ -58,10 +33,6 @@ _CLEAN_TEXT_RE = re.compile(r'[^a-zA-Z0-9\s]')
 _TOKEN_CACHE = {}
 
 def clean_metadata_token(token):
-    """
-    Converts multi-word tokens into single entity strings (e.g. 'Science Fiction' -> 'sciencefiction',
-    'Christopher Nolan' -> 'christophernolan') and lowercases them to prevent ambiguous unigram splits.
-    """
     if not isinstance(token, str) or not token:
         return ''
     if token in _TOKEN_CACHE:
@@ -72,9 +43,6 @@ def clean_metadata_token(token):
 
 
 def parse_delimited_tokens(val, delimiter='|', max_tokens=None):
-    """
-    Splits delimited strings, cleans each token into unified entities, and returns joined tokens.
-    """
     if not isinstance(val, str) or not val.strip():
         return ''
     raw_tokens = [t.strip() for t in val.split(delimiter) if t.strip()]
@@ -85,14 +53,6 @@ def parse_delimited_tokens(val, delimiter='|', max_tokens=None):
 
 
 def build_metadata_soup(row, genre_weight=3, keyword_weight=2, cast_weight=2, director_weight=3):
-    """
-    Constructs a weighted 'metadata soup' document for each movie combining:
-      - Genres (weighted repetition)
-      - Plot Overview / Synopsis (raw cleaned text)
-      - Keywords / Tags (weighted repetition)
-      - Cast members (if present)
-      - Directors / Filmmakers (if present)
-    """
     parts = []
     
     # 1. Genres (high semantic importance)
@@ -128,9 +88,6 @@ def build_metadata_soup(row, genre_weight=3, keyword_weight=2, cast_weight=2, di
 
 
 def load_dataset(dataset_file='movies_dataset.csv'):
-    """
-    Loads dataset file and cleans metadata features for Content-Based Filtering.
-    """
     if not os.path.exists(dataset_file):
         print(f"[!] Error: Dataset file '{dataset_file}' not found.")
         print(f"    Please ensure '{dataset_file}' is in the current directory.")
@@ -177,15 +134,9 @@ def load_dataset(dataset_file='movies_dataset.csv'):
     print(f"[+] Successfully loaded {len(data):,} ratings across {data['title'].nunique():,} unique titles.\n")
     return data
 
-
-# ======================================================================================
 # 2. CONTENT-BASED RECOMMENDER ENGINE (TF-IDF & COSINE SIMILARITY)
-# ======================================================================================
 
 class ContentBasedRecommender:
-    """
-    Content-Based Filtering Recommender Engine using TF-IDF and Cosine Similarity.
-    """
     def __init__(self, max_features=25000, ngram_range=(1, 2)):
         self.max_features = max_features
         self.ngram_range = ngram_range
@@ -197,9 +148,6 @@ class ContentBasedRecommender:
         self.data = None
 
     def fit(self, data):
-        """
-        Builds movie catalog aggregation, constructs metadata soups, and fits TF-IDF vectorizer.
-        """
         print("[*] Processing Movie Metadata & Aggregating Catalog...")
         self.data = data
         
@@ -207,8 +155,6 @@ class ContentBasedRecommender:
         agg_dict = {
             'movieId': ('movieId', 'first') if 'movieId' in data.columns else ('title', 'count'),
             'genres': ('genres_clean', 'first'),
-            'keywords': ('keywords_clean', 'first'),
-            'overview': ('overview_clean', 'first'),
             'genres_clean': ('genres_clean', 'first'),
             'keywords_clean': ('keywords_clean', 'first'),
             'overview_clean': ('overview_clean', 'first'),
@@ -261,13 +207,6 @@ class ContentBasedRecommender:
         return self
 
     def get_similar_movies(self, target_title, top_n=10, min_similarity=0.01):
-        """
-        Computes Cosine Similarity between the target movie and all other movies in the catalog.
-        Enforces a maximum limit of 10 recommendations.
-        
-        Returns:
-            pd.DataFrame: Top similar movies with similarity scores and metadata.
-        """
         if target_title not in self.title_to_idx:
             return None
             
@@ -310,9 +249,6 @@ class ContentBasedRecommender:
         return pd.DataFrame(results)
 
     def explain_similarity(self, target_title, recommended_title, top_k_features=5):
-        """
-        Explains why a recommendation was generated by extracting the highest contributing TF-IDF tokens.
-        """
         if target_title not in self.title_to_idx or recommended_title not in self.title_to_idx:
             return []
             
@@ -333,124 +269,9 @@ class ContentBasedRecommender:
                 explanations.append((feature_names[fi], round(float(contrib[fi]), 4)))
         return explanations
 
-    def recommend_for_user_profile(self, user_id, top_n=10, min_rating=3.0):
-        """
-        Generates Content-Based recommendations personalized for a specific user.
-        Builds a User Preference Vector by aggregating TF-IDF vectors of movies the user liked/rated,
-        weighted by their rating deviations from the user's mean.
-        """
-        if self.data is None or 'userId' not in self.data.columns:
-            print("[!] User rating interaction history is required for user profile recommendations.")
-            return None
-            
-        user_ratings = self.data[self.data['userId'] == user_id]
-        if user_ratings.empty:
-            print(f"[!] No rating history found for User ID {user_id}.")
-            return None
-            
-        # Filter movies the user has positively rated
-        positive_ratings = user_ratings[user_ratings['rating'] >= min_rating]
-        if positive_ratings.empty:
-            positive_ratings = user_ratings
-            
-        user_mean = user_ratings['rating'].mean()
-        weighted_vector = np.zeros((1, self.tfidf_matrix.shape[1]))
-        rated_indices = set()
-        
-        for _, row in positive_ratings.iterrows():
-            title = row['title']
-            if title in self.title_to_idx:
-                idx = self.title_to_idx[title]
-                rated_indices.add(idx)
-                # Weight = (rating - user_mean + 1.0)
-                weight = max(0.1, float(row['rating']) - user_mean + 1.0)
-                weighted_vector += weight * self.tfidf_matrix[idx].toarray()
-                
-        # Normalize user vector
-        norm = np.linalg.norm(weighted_vector)
-        if norm > 0:
-            weighted_vector /= norm
-            
-        sim_scores = cosine_similarity(weighted_vector, self.tfidf_matrix).flatten()
-        sim_indices = np.argsort(sim_scores)[::-1]
-        
-        results = []
-        for idx in sim_indices:
-            if idx in rated_indices:
-                continue  # Don't recommend already seen/rated movies
-            score = sim_scores[idx]
-            row = self.movie_stats.iloc[idx]
-            results.append({
-                'title': row['title'],
-                'Profile Match': round(float(score), 4),
-                'avg_rating': row['avg_rating'],
-                'num_of_ratings': row['num_of_ratings'],
-                'genres': row['genres_clean'] if row['genres_clean'] else 'N/A',
-                'keywords': row['keywords_clean'][:60] + '...' if len(str(row['keywords_clean'])) > 60 else (row['keywords_clean'] or 'N/A')
-            })
-            if len(results) >= top_n:
-                break
-                
-        return pd.DataFrame(results)
-
-    def recommend_for_cold_start_item(self, new_title, genres='', keywords='', overview='', director='', cast='', top_n=10):
-        """
-        Demonstrates Content-Based Filtering's Cold-Start capability:
-        Generates recommendations for an arbitrary brand-new movie with 0 historical ratings
-        solely from its textual metadata.
-        """
-        temp_row = {
-            'genres_clean': fast_extract_names(genres) if '[' in genres else genres,
-            'keywords_clean': fast_extract_names(keywords) if '[' in keywords else keywords,
-            'overview_clean': overview,
-            'director_clean': director,
-            'cast_clean': cast
-        }
-        soup = build_metadata_soup(temp_row)
-        new_vec = self.vectorizer.transform([soup])
-        sim_scores = linear_kernel(new_vec, self.tfidf_matrix).flatten()
-        sim_indices = np.argsort(sim_scores)[::-1]
-        
-        results = []
-        for idx in sim_indices:
-            score = sim_scores[idx]
-            row = self.movie_stats.iloc[idx]
-            if row['title'].lower() == new_title.lower():
-                continue
-            results.append({
-                'title': row['title'],
-                'Similarity': round(float(score), 4),
-                'avg_rating': row['avg_rating'],
-                'num_of_ratings': row['num_of_ratings'],
-                'genres': row['genres_clean'] if row['genres_clean'] else 'N/A',
-                'keywords': row['keywords_clean'][:60] + '...' if len(str(row['keywords_clean'])) > 60 else (row['keywords_clean'] or 'N/A')
-            })
-            if len(results) >= top_n:
-                break
-        return pd.DataFrame(results)
-
-    def evaluate(self, test_size=0.2, random_state=42, relevance_threshold=3.5, top_k=10):
-        """
-        Evaluates the content-based recommender system on an 80/20 Train-Test split.
-        """
-        return evaluate_recommender_system(
-            data=self.data,
-            test_size=test_size,
-            random_state=random_state,
-            relevance_threshold=relevance_threshold,
-            top_k=top_k
-        )
-
-
-# ======================================================================================
 # 3. INTELLIGENT SEARCH ENGINE MODULE
-# ======================================================================================
 
 def normalize_title_query(query):
-    """
-    Generates variations for queries with leading articles.
-    Example: 'Matrix' -> ['Matrix', 'The Matrix', 'Matrix, The']
-    """
     query_clean = query.strip()
     variants = [query_clean]
     for article in ['The ', 'A ', 'An ']:
@@ -463,12 +284,6 @@ def normalize_title_query(query):
 
 
 def search_movies(query, titles_list, movie_stats, max_results=5):
-    """
-    Multi-attribute all-search engine:
-    1. Exact case-insensitive match on Title.
-    2. Candidate scoring across Titles, Keywords/Tags, Genres, and Plot Overview.
-    3. Fuzzy string matching fallback.
-    """
     query_clean = query.strip()
     query_lower = query_clean.lower()
     query_variants = normalize_title_query(query_clean)
@@ -528,16 +343,9 @@ def search_movies(query, titles_list, movie_stats, max_results=5):
     fuzzy_matches = difflib.get_close_matches(query_clean, titles_list, n=max_results, cutoff=0.4)
     return fuzzy_matches
 
-
-# ======================================================================================
 # 4. TABULAR FORMATTING & EVALUATION MODULES
-# ======================================================================================
 
 def print_ascii_table(data, max_col_widths=None):
-    """
-    Renders a clean ASCII boxed table with vertical column dividers '|' and horizontal borders '+---+'.
-    Accepts a pandas DataFrame, list of dicts, or list of lists.
-    """
     if isinstance(data, pd.DataFrame):
         headers = list(data.columns)
         rows = [[str(val) for val in row] for row in data.values]
@@ -592,12 +400,6 @@ def print_ascii_table(data, max_col_widths=None):
 
 
 def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_threshold=3.5, top_k=10):
-    """
-    Evaluates the Content-Based recommender system using an 80/20 Train-Test split based on assignment requirements:
-      1. Rating Prediction Error (MSE, RMSE) -> Assignment Requirement 3.d.ii
-      2. Top-10 Recommendation Evaluation (Precision@10, Recall@10, F1@10, Hits) -> Assignment Requirement 3.d.i
-    Returns a comprehensive metrics dictionary for programmatic and GUI access.
-    """
     print("\n" + "="*75)
     print("  [EVALUATION] CONTENT-BASED RECOMMENDER SYSTEM ACCURACY (80/20 Split)")
     print("="*75)
@@ -717,10 +519,7 @@ def evaluate_recommender_system(data, test_size=0.2, random_state=42, relevance_
     }
 
 
-def evaluate_content_based_system(cbf_model=None, data=None, test_size=0.2, random_state=42, relevance_threshold=3.5, k=10, num_negatives=100, max_eval_users=200):
-    """
-    Backwards-compatible wrapper executing the comprehensive Content-Based 80/20 evaluation.
-    """
+def evaluate_content_based_system(cbf_model=None, data=None, test_size=0.2, random_state=42, relevance_threshold=3.5, k=10):
     if data is None and cbf_model is not None:
         data = cbf_model.data
     return evaluate_recommender_system(
@@ -731,15 +530,9 @@ def evaluate_content_based_system(cbf_model=None, data=None, test_size=0.2, rand
         top_k=k
     )
 
-
-# ======================================================================================
 # 5. DATASET & METADATA SUMMARY ANALYTICS
-# ======================================================================================
 
 def get_dataset_summary_metrics(data, cbf_model=None):
-    """
-    Computes comprehensive statistics and content feature space properties.
-    """
     num_ratings = len(data)
     num_users = data['userId'].nunique() if 'userId' in data.columns else 0
     num_movies = data['movieId'].nunique() if 'movieId' in data.columns else data['title'].nunique()
@@ -766,48 +559,9 @@ def get_dataset_summary_metrics(data, cbf_model=None):
         'global_mean': global_mean
     }
 
-
-def display_dataset_summary(cbf_model):
-    """
-    Displays metadata statistics and feature distributions.
-    """
-    print("\n" + "="*75)
-    print("              [ANALYTICS] DATASET & CONTENT METADATA SUMMARY")
-    print("="*75)
-    
-    stats = cbf_model.movie_stats
-    num_movies = len(stats)
-    num_ratings = len(cbf_model.data) if cbf_model.data is not None else 0
-    vocab_size = len(cbf_model.vectorizer.vocabulary_) if cbf_model.vectorizer else 25000
-    
-    has_genres = (stats['genres_clean'] != '').sum()
-    has_keywords = (stats['keywords_clean'] != '').sum()
-    has_overview = (stats['overview_clean'] != '').sum()
-    
-    print(f"Total Unique Movies    : {num_movies:,}")
-    print(f"Total Rating Records   : {num_ratings:,}")
-    print(f"TF-IDF Vocabulary Size : {vocab_size:,} n-gram tokens")
-    print(f"Metadata Completeness  :")
-    print(f"  - Genres Available   : {has_genres:,} / {num_movies:,} ({has_genres/num_movies*100:.1f}%)")
-    print(f"  - Keywords Available : {has_keywords:,} / {num_movies:,} ({has_keywords/num_movies*100:.1f}%)")
-    print(f"  - Overviews Available: {has_overview:,} / {num_movies:,} ({has_overview/num_movies*100:.1f}%)")
-    
-    print("\nTop 5 Most Popular Movies by Rating Count:")
-    top_popular = stats.sort_values('num_of_ratings', ascending=False).head(5)[['title', 'avg_rating', 'num_of_ratings', 'genres_clean']].copy()
-    top_popular.rename(columns={'title': 'Title', 'avg_rating': 'Avg Rating', 'num_of_ratings': 'Ratings', 'genres_clean': 'Genres'}, inplace=True)
-    top_popular['Avg Rating'] = top_popular['Avg Rating'].apply(lambda r: f"{r:.2f}/5.0")
-    print_ascii_table(top_popular, max_col_widths={'Title': 36, 'Genres': 28})
-    print("="*75 + "\n")
-
-
-# ======================================================================================
 # 6. INTERACTIVE CONSOLE WORKFLOWS
-# ======================================================================================
 
 def search_for_movie_mode(cbf_model):
-    """
-    [1] Search for a movie in the database by title, genre, keyword, or plot overview.
-    """
     titles_list = cbf_model.movie_stats['title'].tolist()
     
     while True:
@@ -848,9 +602,6 @@ def search_for_movie_mode(cbf_model):
 
 
 def get_recommendations_by_movie_mode(cbf_model):
-    """
-    [2] Get Content-Based recommendations for a specific movie using TF-IDF & Cosine Similarity.
-    """
     titles_list = cbf_model.movie_stats['title'].tolist()
     
     while True:
@@ -949,10 +700,7 @@ def get_recommendations_by_movie_mode(cbf_model):
                 tokens_str = ', '.join([f"'{token}' ({score})" for token, score in explanations[:4]])
                 print(f"\n[i] Why recommended '{top_rec_title}'? Shared Content Tokens: {tokens_str}")
 
-
-# ======================================================================================
 # 7. MAIN CONTROLLER & MENU
-# ======================================================================================
 
 def main():
     print("="*65)
